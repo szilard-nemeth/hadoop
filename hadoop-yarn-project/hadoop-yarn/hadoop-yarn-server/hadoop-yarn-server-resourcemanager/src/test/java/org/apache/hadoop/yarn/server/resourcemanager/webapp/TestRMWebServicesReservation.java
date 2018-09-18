@@ -18,6 +18,8 @@
 
 package org.apache.hadoop.yarn.server.resourcemanager.webapp;
 
+import static org.apache.hadoop.yarn.server.resourcemanager.webapp
+    .representationhelper.FileReaderTestHelper.loadFileAsString;
 import static org.apache.hadoop.yarn.webapp.WebServicesTestUtils.assertResponseStatusCode;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -27,7 +29,6 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringReader;
-import java.net.URL;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Enumeration;
@@ -37,7 +38,6 @@ import javax.servlet.FilterConfig;
 import javax.servlet.ServletException;
 import javax.ws.rs.core.MediaType;
 
-import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.http.JettyUtils;
 import org.apache.hadoop.security.authentication.server.AuthenticationFilter;
@@ -1021,7 +1021,7 @@ public class TestRMWebServicesReservation extends JerseyTestBase {
   private ClientResponse reservationSubmissionTestHelper(String path,
       String media, Long arrival, String reservationName,
       ReservationId reservationId) throws Exception {
-    String reservationJson = loadJsonFile("submit-reservation.json");
+    String reservationJson = loadFileAsString("submit-reservation.json");
 
     String recurrenceExpression = "";
     if (enableRecurrence) {
@@ -1061,7 +1061,7 @@ public class TestRMWebServicesReservation extends JerseyTestBase {
   private void updateReservationTestHelper(String path,
       ReservationId reservationId, String media) throws Exception {
 
-    String reservationJson = loadJsonFile("update-reservation.json");
+    String reservationJson = loadFileAsString("update-reservation.json");
 
     JSONJAXBContext jc =
         new JSONJAXBContext(JSONConfiguration.mapped()
@@ -1095,23 +1095,11 @@ public class TestRMWebServicesReservation extends JerseyTestBase {
 
   }
 
-  private String loadJsonFile(String filename) throws IOException {
-    ClassLoader cL = Thread.currentThread().getContextClassLoader();
-    if (cL == null) {
-      cL = Configuration.class.getClassLoader();
-    }
-    URL submitURI = cL.getResource(filename);
-
-    String reservationJson =
-        FileUtils.readFileToString(new File(submitURI.getFile()));
-    return reservationJson;
-  }
-
   private void testDeleteReservationHelper(String path,
       ReservationId reservationId, String media) throws JSONException,
       Exception {
 
-    String reservationJson = loadJsonFile("delete-reservation.json");
+    String reservationJson = loadFileAsString("delete-reservation.json");
 
     JSONJAXBContext jc =
         new JSONJAXBContext(JSONConfiguration.mapped()

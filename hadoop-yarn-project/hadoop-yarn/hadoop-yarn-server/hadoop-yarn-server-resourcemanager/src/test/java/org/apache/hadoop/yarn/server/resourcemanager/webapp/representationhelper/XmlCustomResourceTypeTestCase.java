@@ -16,27 +16,25 @@
  * limitations under the License.
  */
 
-package org.apache.hadoop.yarn.server.resourcemanager.webapp.helper;
+package org.apache.hadoop.yarn.server.resourcemanager.webapp.representationhelper;
 
+import com.sun.jersey.api.client.ClientResponse;
 import com.sun.jersey.api.client.WebResource;
 import org.apache.hadoop.http.JettyUtils;
+import org.apache.hadoop.yarn.server.resourcemanager.webapp.representationhelper.xml.XmlResponseAdapter;
 import org.codehaus.jettison.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
-import org.w3c.dom.Node;
 import org.xml.sax.InputSource;
 
 import javax.ws.rs.core.MediaType;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.transform.*;
-import javax.xml.transform.dom.DOMSource;
-import javax.xml.transform.stream.StreamResult;
 import java.io.StringReader;
-import java.io.StringWriter;
 import java.util.function.Consumer;
 
+import static org.apache.hadoop.yarn.webapp.WebServicesTestUtils.toXml;
 import static org.junit.Assert.assertEquals;
 
 /**
@@ -57,18 +55,24 @@ public class XmlCustomResourceTypeTestCase {
   private Document parsedResponse;
 
   public XmlCustomResourceTypeTestCase(WebResource path,
-                                       BufferedClientResponse response) {
+      ClientResponse response) {
     this.path = path;
-    this.response = response;
+    this.response = new BufferedClientResponse(response);
+    this.parsedResponse = parseXml(this.response);
   }
 
-  public void verify(Consumer<Document> verifier) {
+  public void verify(Consumer<ResponseAdapter> verifier) {
     assertEquals(MediaType.APPLICATION_XML + "; " + JettyUtils.UTF_8,
         response.getType().toString());
 
-    parsedResponse = parseXml(response);
     logResponse(parsedResponse);
-    verifier.accept(parsedResponse);
+
+    String responseStr = response.getEntity(String.class);
+    if (responseStr == null || responseStr.isEmpty()) {
+      throw new IllegalStateException("Response is null or empty!");
+    }
+    XmlResponseAdapter responseAdapter = new XmlResponseAdapter(response);
+    verifier.accept(responseAdapter);
   }
 
   private Document parseXml(BufferedClientResponse response) {
@@ -78,7 +82,6 @@ public class XmlCustomResourceTypeTestCase {
           DocumentBuilderFactory.newInstance().newDocumentBuilder();
       InputSource is = new InputSource();
       is.setCharacterStream(new StringReader(xml));
-
       return db.parse(is);
     } catch (Exception e) {
       throw new RuntimeException(e);
@@ -91,22 +94,5 @@ public class XmlCustomResourceTypeTestCase {
         responseStr);
     LOG.info("Parsed response from service URL {}: {}", path.toString(),
         toXml(doc));
-  }
-
-  public static String toXml(Node node) {
-    StringWriter writer;
-    try {
-      TransformerFactory tf = TransformerFactory.newInstance();
-      Transformer transformer = tf.newTransformer();
-      transformer.setOutputProperty(OutputKeys.INDENT, "yes");
-      transformer.setOutputProperty(
-          "{http://xml.apache.org/xslt}indent" + "-amount", "2");
-      writer = new StringWriter();
-      transformer.transform(new DOMSource(node), new StreamResult(writer));
-    } catch (TransformerException e) {
-      throw new RuntimeException(e);
-    }
-
-    return writer.getBuffer().toString();
   }
 }

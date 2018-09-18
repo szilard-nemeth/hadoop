@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.hadoop.yarn.server.resourcemanager.webapp.helper;
+package org.apache.hadoop.yarn.server.resourcemanager.webapp.representationhelper;
 
 
 import com.sun.jersey.api.client.ClientHandlerException;
@@ -36,7 +36,7 @@ import java.io.IOException;
 public class BufferedClientResponse {
   private ClientResponse response;
 
-  public BufferedClientResponse(ClientResponse response) {
+  BufferedClientResponse(ClientResponse response) {
     response.bufferEntity();
     this.response = response;
   }

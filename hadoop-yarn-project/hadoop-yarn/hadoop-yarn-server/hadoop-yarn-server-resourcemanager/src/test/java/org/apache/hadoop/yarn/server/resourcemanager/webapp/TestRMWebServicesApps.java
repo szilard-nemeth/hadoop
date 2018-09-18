@@ -52,6 +52,19 @@ import org.apache.hadoop.yarn.server.resourcemanager.scheduler.AbstractYarnSched
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.ResourceScheduler;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.fifo.FifoScheduler;
 import org.apache.hadoop.yarn.server.resourcemanager.webapp.dao.AppInfo;
+import org.apache.hadoop.yarn.server.resourcemanager.webapp
+    .representationhelper.AppInfoVerifications;
+import org.apache.hadoop.yarn.server.resourcemanager.webapp.representationhelper.ArrayWrapper;
+
+import org.apache.hadoop.yarn.server.resourcemanager.webapp
+    .representationhelper.BufferedClientResponse;
+import org.apache.hadoop.yarn.server.resourcemanager.webapp.representationhelper
+    .ElementWrapper;
+import org.apache.hadoop.yarn.server.resourcemanager.webapp
+    .representationhelper.ResourceRequestsVerifications;
+import org.apache.hadoop.yarn.server.resourcemanager.webapp
+    .representationhelper.XmlCustomResourceTypeTestCase;
+import org.apache.hadoop.yarn.server.resourcemanager.webapp.representationhelper.json.JsonObjectWrapper;
 import org.apache.hadoop.yarn.webapp.GenericExceptionHandler;
 import org.apache.hadoop.yarn.webapp.GuiceServletConfig;
 import org.apache.hadoop.yarn.webapp.JerseyTestBase;
@@ -157,27 +170,27 @@ public class TestRMWebServicesApps extends JerseyTestBase {
     RMApp app1 = rm.submitApp(CONTAINER_MB, "testwordcount", "user1");
     amNodeManager.nodeHeartbeat(true);
     WebResource r = resource();
-    ClientResponse response = r.path("ws").path("v1").path("cluster")
-        .path("apps").accept(MediaType.APPLICATION_XML)
+    WebResource path = r.path("ws").path("v1").path("cluster")
+            .path("apps");
+    ClientResponse response = path.accept(MediaType.APPLICATION_XML)
         .get(ClientResponse.class);
-    assertEquals(MediaType.APPLICATION_XML_TYPE + "; " + JettyUtils.UTF_8,
-        response.getType().toString());
-    String xml = response.getEntity(String.class);
-    DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
-    DocumentBuilder db = dbf.newDocumentBuilder();
-    InputSource is = new InputSource();
-    is.setCharacterStream(new StringReader(xml));
-    Document dom = db.parse(is);
-    NodeList nodesApps = dom.getElementsByTagName("apps");
-    assertEquals("incorrect number of elements", 1, nodesApps.getLength());
-    NodeList nodes = dom.getElementsByTagName("app");
-    assertEquals("incorrect number of elements", 1, nodes.getLength());
-    verifyAppsXML(nodes, app1, false);
+
+    XmlCustomResourceTypeTestCase testCase = new XmlCustomResourceTypeTestCase(
+            path, response);
+    testCase.verify(responseAdapter -> {
+      ArrayWrapper arrayWrapper = responseAdapter.getArray("apps[]");
+      assertEquals("incorrect number of elements", 1, arrayWrapper.length());
+
+      ArrayWrapper appArray = responseAdapter.getArray("apps.app[]");
+      assertEquals("incorrect number of elements", 1, appArray.length());
+      verifyAppsXML(appArray, app1, false);
+    });
+
     rm.stop();
   }
 
   @Test
-  public void testRunningApp() throws JSONException, Exception {
+  public void testRunningApp() throws Exception {
     rm.start();
     MockNM amNodeManager = rm.registerNode("127.0.0.1:1234", 2048);
     RMApp app1 = rm.submitApp(CONTAINER_MB, "testwordcount", "user1");
@@ -186,22 +199,23 @@ public class TestRMWebServicesApps extends JerseyTestBase {
     amNodeManager.nodeHeartbeat(true);
 
     WebResource r = resource();
-    ClientResponse response = r.path("ws").path("v1").path("cluster")
-        .path("apps").accept(MediaType.APPLICATION_XML)
+    WebResource path = r.path("ws").path("v1").path("cluster")
+            .path("apps");
+    ClientResponse response = path.accept(MediaType.APPLICATION_XML)
         .get(ClientResponse.class);
     assertEquals(MediaType.APPLICATION_XML_TYPE + "; " + JettyUtils.UTF_8,
         response.getType().toString());
-    String xml = response.getEntity(String.class);
-    DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
-    DocumentBuilder db = dbf.newDocumentBuilder();
-    InputSource is = new InputSource();
-    is.setCharacterStream(new StringReader(xml));
-    Document dom = db.parse(is);
-    NodeList nodesApps = dom.getElementsByTagName("apps");
-    assertEquals("incorrect number of elements", 1, nodesApps.getLength());
-    NodeList nodes = dom.getElementsByTagName("app");
-    assertEquals("incorrect number of elements", 1, nodes.getLength());
-    verifyAppsXML(nodes, app1, true);
+
+    XmlCustomResourceTypeTestCase testCase = new XmlCustomResourceTypeTestCase(
+            path, response);
+    testCase.verify(responseAdapter -> {
+      ElementWrapper appsWrapper = responseAdapter.getElement("apps");
+      assertEquals("incorrect number of elements", 1, appsWrapper.length());
+
+      ArrayWrapper appArray = appsWrapper.getChildArray("app");
+      assertEquals("incorrect number of elements", 1, appArray.length());
+      verifyAppsXML(appArray, app1, false);
+    });
 
     testAppsHelper("apps/", app1, MediaType.APPLICATION_JSON, true);
     rm.stop();
@@ -254,8 +268,8 @@ public class TestRMWebServicesApps extends JerseyTestBase {
     assertEquals("incorrect number of elements", 1, apps.length());
     JSONArray array = apps.getJSONArray("app");
     assertEquals("incorrect number of elements", 1, array.length());
-    verifyAppInfo(array.getJSONObject(0), app, hasResourceReq);
-
+    verifyAppInfoJson(
+            new JsonObjectWrapper(array.getJSONObject(0)), app, hasResourceReq);
   }
 
   @Test
@@ -278,7 +292,8 @@ public class TestRMWebServicesApps extends JerseyTestBase {
     assertEquals("incorrect number of elements", 1, apps.length());
     JSONArray array = apps.getJSONArray("app");
     assertEquals("incorrect number of elements", 1, array.length());
-    verifyAppInfo(array.getJSONObject(0), app1, false);
+    verifyAppInfoJson(
+            new JsonObjectWrapper(array.getJSONObject(0)), app1, false);
     rm.stop();
   }
 
@@ -523,7 +538,8 @@ public class TestRMWebServicesApps extends JerseyTestBase {
     assertEquals("incorrect number of elements", 1, apps.length());
     JSONArray array = apps.getJSONArray("app");
     assertEquals("incorrect number of elements", 1, array.length());
-    verifyAppInfo(array.getJSONObject(0), app1, false);
+    verifyAppInfoJson(
+            new JsonObjectWrapper(array.getJSONObject(0)), app1, false);
     rm.stop();
   }
 
@@ -1506,7 +1522,8 @@ public class TestRMWebServicesApps extends JerseyTestBase {
     JSONObject json = response.getEntity(JSONObject.class);
 
     assertEquals("incorrect number of elements", 1, json.length());
-    verifyAppInfo(json.getJSONObject("app"), app, false);
+    verifyAppInfoJson(
+            new JsonObjectWrapper(json.getJSONObject("app")), app, false);
   }
 
   @Test
@@ -1515,274 +1532,83 @@ public class TestRMWebServicesApps extends JerseyTestBase {
     MockNM amNodeManager = rm.registerNode("127.0.0.1:1234", 2048);
     RMApp app1 = rm.submitApp(CONTAINER_MB, "testwordcount", "user1");
     amNodeManager.nodeHeartbeat(true);
-    WebResource r = resource();
-    ClientResponse response = r.path("ws").path("v1").path("cluster")
-        .path("apps").path(app1.getApplicationId().toString())
-        .accept(MediaType.APPLICATION_XML).get(ClientResponse.class);
-    assertEquals(MediaType.APPLICATION_XML_TYPE + "; " + JettyUtils.UTF_8,
-        response.getType().toString());
-    String xml = response.getEntity(String.class);
 
-    DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
-    DocumentBuilder db = dbf.newDocumentBuilder();
-    InputSource is = new InputSource();
-    is.setCharacterStream(new StringReader(xml));
-    Document dom = db.parse(is);
-    NodeList nodes = dom.getElementsByTagName("app");
-    assertEquals("incorrect number of elements", 1, nodes.getLength());
-    verifyAppsXML(nodes, app1, false);
+    WebResource r = resource();
+    WebResource path = r.path("ws").path("v1").path("cluster")
+            .path("apps").path(app1.getApplicationId().toString());
+    ClientResponse response = path.accept(MediaType.APPLICATION_XML)
+            .get(ClientResponse.class);
+
+    XmlCustomResourceTypeTestCase testCase = new XmlCustomResourceTypeTestCase(
+            path, response);
+    testCase.verify(responseAdapter -> {
+      ArrayWrapper arrayWrapper = responseAdapter.getArray("app[]");
+      assertEquals("incorrect number of elements", 1, arrayWrapper.length());
+      verifyAppsXML(arrayWrapper, app1, false);
+    });
+
     rm.stop();
   }
 
-  public void verifyAppsXML(NodeList nodes, RMApp app, boolean hasResourceReq)
-      throws JSONException, Exception {
-
-    for (int i = 0; i < nodes.getLength(); i++) {
-      Element element = (Element) nodes.item(i);
-
-      verifyAppInfoGeneric(app,
-          WebServicesTestUtils.getXmlString(element, "id"),
-          WebServicesTestUtils.getXmlString(element, "user"),
-          WebServicesTestUtils.getXmlString(element, "name"),
-          WebServicesTestUtils.getXmlString(element, "applicationType"),
-          WebServicesTestUtils.getXmlString(element, "queue"),
-          WebServicesTestUtils.getXmlInt(element, "priority"),
-          WebServicesTestUtils.getXmlString(element, "state"),
-          WebServicesTestUtils.getXmlString(element, "finalStatus"),
-          WebServicesTestUtils.getXmlFloat(element, "progress"),
-          WebServicesTestUtils.getXmlString(element, "trackingUI"),
-          WebServicesTestUtils.getXmlString(element, "diagnostics"),
-          WebServicesTestUtils.getXmlLong(element, "clusterId"),
-          WebServicesTestUtils.getXmlLong(element, "startedTime"),
-          WebServicesTestUtils.getXmlLong(element, "launchTime"),
-          WebServicesTestUtils.getXmlLong(element, "finishedTime"),
-          WebServicesTestUtils.getXmlLong(element, "elapsedTime"),
-          WebServicesTestUtils.getXmlString(element, "amHostHttpAddress"),
-          WebServicesTestUtils.getXmlString(element, "amContainerLogs"),
-          WebServicesTestUtils.getXmlInt(element, "allocatedMB"),
-          WebServicesTestUtils.getXmlInt(element, "allocatedVCores"),
-          WebServicesTestUtils.getXmlInt(element, "runningContainers"),
-          WebServicesTestUtils.getXmlFloat(element, "queueUsagePercentage"),
-          WebServicesTestUtils.getXmlFloat(element, "clusterUsagePercentage"),
-          WebServicesTestUtils.getXmlInt(element, "preemptedResourceMB"),
-          WebServicesTestUtils.getXmlInt(element, "preemptedResourceVCores"),
-          WebServicesTestUtils.getXmlInt(element, "numNonAMContainerPreempted"),
-          WebServicesTestUtils.getXmlInt(element, "numAMContainerPreempted"),
-          WebServicesTestUtils.getXmlString(element, "logAggregationStatus"),
-          WebServicesTestUtils.getXmlBoolean(element, "unmanagedApplication"),
-          WebServicesTestUtils.getXmlString(element, "appNodeLabelExpression"),
-          WebServicesTestUtils.getXmlString(element, "amNodeLabelExpression"),
-          WebServicesTestUtils.getXmlString(element, "amRPCAddress"));
+  private void verifyAppsXML(ArrayWrapper array, RMApp app, boolean
+          hasResourceReq) {
+    for (int i = 0; i < array.length(); i++) {
+      ElementWrapper element =  array.getObjectAtIndex(i);
+      AppInfoVerifications.verify(element, app);
 
       if (hasResourceReq) {
-        assertEquals(element.getElementsByTagName("resourceRequests").getLength(),
-            1);
-        Element resourceRequests =
-            (Element) element.getElementsByTagName("resourceRequests").item(0);
-        Element capability =
-            (Element) resourceRequests.getElementsByTagName("capability").item(0);
+        ArrayWrapper resourceRequests = element
+                .getChildArray("resourceRequests");
+        assertEquals(resourceRequests.length(), 1);
+        ElementWrapper resourceRequest = resourceRequests.getObjectAtIndex(0);
         ResourceRequest rr =
             ((AbstractYarnScheduler)rm.getRMContext().getScheduler())
                 .getApplicationAttempt(
                     app.getCurrentAppAttempt().getAppAttemptId())
                 .getAppSchedulingInfo().getAllResourceRequests().get(0);
-        verifyResourceRequestsGeneric(rr,
-            WebServicesTestUtils.getXmlString(resourceRequests,
-                "nodeLabelExpression"),
-            WebServicesTestUtils.getXmlInt(resourceRequests, "numContainers"),
-            WebServicesTestUtils.getXmlBoolean(resourceRequests, "relaxLocality"),
-            WebServicesTestUtils.getXmlInt(resourceRequests, "priority"),
-            WebServicesTestUtils.getXmlString(resourceRequests, "resourceName"),
-            WebServicesTestUtils.getXmlLong(capability, "memory"),
-            WebServicesTestUtils.getXmlLong(capability, "vCores"),
-            WebServicesTestUtils.getXmlString(resourceRequests, "executionType"),
-            WebServicesTestUtils.getXmlBoolean(resourceRequests,
-                "enforceExecutionType"));
+        ResourceRequestsVerifications.verify(resourceRequest, rr);
       }
     }
   }
 
-  public void verifyAppInfo(JSONObject info, RMApp app, boolean hasResourceReqs)
-      throws JSONException, Exception {
+  private void verifyAppInfoJson(ElementWrapper info, RMApp app, boolean
+          hasResourceReqs) {
+    assertEquals("incorrect number of elements",
+        getExpectedNumberOfElements(app, hasResourceReqs), info.length());
 
+    AppInfoVerifications.verify(info, app);
+    if (hasResourceReqs) {
+      ArrayWrapper resourceRequests = info.getChildArray("resourceRequests");
+      ElementWrapper requestInfo = resourceRequests.getObjectAtIndex(0);
+      ResourceRequest resourceRequest =
+              ((AbstractYarnScheduler) rm.getRMContext().getScheduler())
+                      .getApplicationAttempt(
+                              app.getCurrentAppAttempt().getAppAttemptId())
+                      .getAppSchedulingInfo().getAllResourceRequests().get(0);
+
+      ResourceRequestsVerifications.verify(requestInfo, resourceRequest);
+    }
+  }
+
+  private int getExpectedNumberOfElements(RMApp app, boolean hasResourceReqs) {
     int expectedNumberOfElements = 40 + (hasResourceReqs ? 2 : 0);
-    String appNodeLabelExpression = null;
-    String amNodeLabelExpression = null;
     if (app.getApplicationSubmissionContext()
         .getNodeLabelExpression() != null) {
       expectedNumberOfElements++;
-      appNodeLabelExpression = info.getString("appNodeLabelExpression");
     }
     if (app.getAMResourceRequests().get(0).getNodeLabelExpression() != null) {
       expectedNumberOfElements++;
-      amNodeLabelExpression = info.getString("amNodeLabelExpression");
     }
-    String amRPCAddress = null;
+
     if (AppInfo.getAmRPCAddressFromRMAppAttempt(app.getCurrentAppAttempt())
         != null) {
       expectedNumberOfElements++;
-      amRPCAddress = info.getString("amRPCAddress");
     }
-    assertEquals("incorrect number of elements", expectedNumberOfElements,
-        info.length());
-    verifyAppInfoGeneric(app, info.getString("id"), info.getString("user"),
-        info.getString("name"), info.getString("applicationType"),
-        info.getString("queue"), info.getInt("priority"),
-        info.getString("state"), info.getString("finalStatus"),
-        (float) info.getDouble("progress"), info.getString("trackingUI"),
-        info.getString("diagnostics"), info.getLong("clusterId"),
-        info.getLong("startedTime"), info.getLong("launchTime"),
-        info.getLong("finishedTime"),
-        info.getLong("elapsedTime"),
-        info.getString("amHostHttpAddress"),
-        info.getString("amContainerLogs"), info.getInt("allocatedMB"),
-        info.getInt("allocatedVCores"), info.getInt("runningContainers"),
-        (float) info.getDouble("queueUsagePercentage"),
-        (float) info.getDouble("clusterUsagePercentage"),
-        info.getInt("preemptedResourceMB"),
-        info.getInt("preemptedResourceVCores"),
-        info.getInt("numNonAMContainerPreempted"),
-        info.getInt("numAMContainerPreempted"),
-        info.getString("logAggregationStatus"),
-        info.getBoolean("unmanagedApplication"),
-        appNodeLabelExpression,
-        amNodeLabelExpression,
-        amRPCAddress);
-
-    if (hasResourceReqs) {
-      verifyResourceRequests(info.getJSONArray("resourceRequests"), app);
-    }
-  }
-
-  public void verifyAppInfoGeneric(RMApp app, String id, String user,
-      String name, String applicationType, String queue, int prioirty,
-      String state, String finalStatus, float progress, String trackingUI,
-      String diagnostics, long clusterId, long startedTime,
-      long launchTime, long finishedTime, long elapsedTime,
-      String amHostHttpAddress, String amContainerLogs,
-      int allocatedMB, int allocatedVCores, int numContainers,
-      float queueUsagePerc, float clusterUsagePerc,
-      int preemptedResourceMB, int preemptedResourceVCores,
-      int numNonAMContainerPreempted, int numAMContainerPreempted,
-      String logAggregationStatus, boolean unmanagedApplication,
-      String appNodeLabelExpression, String amNodeLabelExpression,
-      String amRPCAddress) throws JSONException, Exception {
-
-    WebServicesTestUtils.checkStringMatch("id", app.getApplicationId()
-        .toString(), id);
-    WebServicesTestUtils.checkStringMatch("user", app.getUser(), user);
-    WebServicesTestUtils.checkStringMatch("name", app.getName(), name);
-    WebServicesTestUtils.checkStringMatch("applicationType",
-      app.getApplicationType(), applicationType);
-    WebServicesTestUtils.checkStringMatch("queue", app.getQueue(), queue);
-    assertEquals("priority doesn't match", 0, prioirty);
-    WebServicesTestUtils.checkStringMatch("state", app.getState().toString(),
-        state);
-    WebServicesTestUtils.checkStringMatch("finalStatus", app
-        .getFinalApplicationStatus().toString(), finalStatus);
-    assertEquals("progress doesn't match", 0, progress, 0.0);
-    if ("UNASSIGNED".equals(trackingUI)) {
-      WebServicesTestUtils.checkStringMatch("trackingUI", "UNASSIGNED",
-          trackingUI);
-    }
-    WebServicesTestUtils.checkStringEqual("diagnostics",
-        app.getDiagnostics().toString(), diagnostics);
-    assertEquals("clusterId doesn't match",
-        ResourceManager.getClusterTimeStamp(), clusterId);
-    assertEquals("startedTime doesn't match", app.getStartTime(), startedTime);
-    assertEquals("finishedTime doesn't match", app.getFinishTime(),
-        finishedTime);
-    assertTrue("elapsed time not greater than 0", elapsedTime > 0);
-    WebServicesTestUtils.checkStringMatch("amHostHttpAddress", app
-        .getCurrentAppAttempt().getMasterContainer().getNodeHttpAddress(),
-        amHostHttpAddress);
-    assertTrue("amContainerLogs doesn't match",
-        amContainerLogs.startsWith("http://"));
-    assertTrue("amContainerLogs doesn't contain user info",
-        amContainerLogs.endsWith("/" + app.getUser()));
-    assertEquals("allocatedMB doesn't match", 1024, allocatedMB);
-    assertEquals("allocatedVCores doesn't match", 1, allocatedVCores);
-    assertEquals("queueUsagePerc doesn't match", 50.0f, queueUsagePerc, 0.01f);
-    assertEquals("clusterUsagePerc doesn't match", 50.0f, clusterUsagePerc, 0.01f);
-    assertEquals("numContainers doesn't match", 1, numContainers);
-    assertEquals("preemptedResourceMB doesn't match", app
-        .getRMAppMetrics().getResourcePreempted().getMemorySize(),
-        preemptedResourceMB);
-    assertEquals("preemptedResourceVCores doesn't match", app
-        .getRMAppMetrics().getResourcePreempted().getVirtualCores(),
-        preemptedResourceVCores);
-    assertEquals("numNonAMContainerPreempted doesn't match", app
-        .getRMAppMetrics().getNumNonAMContainersPreempted(),
-        numNonAMContainerPreempted);
-    assertEquals("numAMContainerPreempted doesn't match", app
-        .getRMAppMetrics().getNumAMContainersPreempted(),
-        numAMContainerPreempted);
-    assertEquals("Log aggregation Status doesn't match", app
-        .getLogAggregationStatusForAppReport().toString(),
-        logAggregationStatus);
-    assertEquals("unmanagedApplication doesn't match", app
-        .getApplicationSubmissionContext().getUnmanagedAM(),
-        unmanagedApplication);
-    assertEquals("unmanagedApplication doesn't match",
-        app.getApplicationSubmissionContext().getNodeLabelExpression(),
-        appNodeLabelExpression);
-    assertEquals("unmanagedApplication doesn't match",
-        app.getAMResourceRequests().get(0).getNodeLabelExpression(),
-        amNodeLabelExpression);
-    assertEquals("amRPCAddress",
-        AppInfo.getAmRPCAddressFromRMAppAttempt(app.getCurrentAppAttempt()),
-        amRPCAddress);
-  }
-
-  public void verifyResourceRequests(JSONArray resourceRequest, RMApp app)
-      throws JSONException {
-    JSONObject requestInfo = resourceRequest.getJSONObject(0);
-    ResourceRequest rr =
-        ((AbstractYarnScheduler) rm.getRMContext().getScheduler())
-            .getApplicationAttempt(
-                app.getCurrentAppAttempt().getAppAttemptId())
-            .getAppSchedulingInfo().getAllResourceRequests().get(0);
-    verifyResourceRequestsGeneric(rr,
-        requestInfo.getString("nodeLabelExpression"),
-        requestInfo.getInt("numContainers"),
-        requestInfo.getBoolean("relaxLocality"), requestInfo.getInt("priority"),
-        requestInfo.getString("resourceName"),
-        requestInfo.getJSONObject("capability").getLong("memory"),
-        requestInfo.getJSONObject("capability").getLong("vCores"),
-        requestInfo.getJSONObject("executionTypeRequest")
-            .getString("executionType"),
-        requestInfo.getJSONObject("executionTypeRequest")
-            .getBoolean("enforceExecutionType"));
-  }
-
-  public void verifyResourceRequestsGeneric(ResourceRequest request,
-      String nodeLabelExpression, int numContainers, boolean relaxLocality,
-      int priority, String resourceName, long memory, long vCores,
-      String executionType, boolean enforceExecutionType) {
-    assertEquals("nodeLabelExpression doesn't match",
-        request.getNodeLabelExpression(), nodeLabelExpression);
-    assertEquals("numContainers doesn't match", request.getNumContainers(),
-        numContainers);
-    assertEquals("relaxLocality doesn't match", request.getRelaxLocality(),
-        relaxLocality);
-    assertEquals("priority does not match", request.getPriority().getPriority(),
-        priority);
-    assertEquals("resourceName does not match", request.getResourceName(),
-        resourceName);
-    assertEquals("memory does not match",
-        request.getCapability().getMemorySize(), memory);
-    assertEquals("vCores does not match",
-        request.getCapability().getVirtualCores(), vCores);
-    assertEquals("executionType does not match",
-        request.getExecutionTypeRequest().getExecutionType().name(),
-        executionType);
-    assertEquals("enforceExecutionType does not match",
-        request.getExecutionTypeRequest().getEnforceExecutionType(),
-        enforceExecutionType);
+    return expectedNumberOfElements;
   }
 
   @Test
-  public void testAppAttempts() throws JSONException, Exception {
+  public void testAppAttempts() throws Exception {
     rm.start();
     MockNM amNodeManager = rm.registerNode("127.0.0.1:1234", 2048);
     RMApp app1 = rm.submitApp(CONTAINER_MB, "testwordcount", "user1");

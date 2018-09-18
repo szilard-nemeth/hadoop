@@ -16,10 +16,13 @@
  * limitations under the License.
  */
 
-package org.apache.hadoop.yarn.server.resourcemanager.webapp.helper;
+package org.apache.hadoop.yarn.server.resourcemanager.webapp.representationhelper;
 
+import com.sun.jersey.api.client.ClientResponse;
 import com.sun.jersey.api.client.WebResource;
 import org.apache.hadoop.http.JettyUtils;
+
+import org.apache.hadoop.yarn.server.resourcemanager.webapp.representationhelper.json.JsonResponseAdapter;
 import org.codehaus.jettison.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,10 +36,10 @@ import static org.junit.Assert.*;
 /**
  * This class hides the implementation details of how to verify the structure of
  * JSON responses. Tests should only provide the path of the
- * {@link WebResource}, the response from the resource and
+ * {@link WebResource}, the response from the resource and last but not least,
  * the verifier Consumer to
  * {@link JsonCustomResourceTypeTestcase#verify(Consumer)}. An instance of
- * {@link JSONObject} will be passed to that consumer to be able to
+ * {@link JsonResponseAdapter} will be passed to that consumer to be able to
  * verify the response.
  */
 public class JsonCustomResourceTypeTestcase {
@@ -48,13 +51,13 @@ public class JsonCustomResourceTypeTestcase {
   private final JSONObject parsedResponse;
 
   public JsonCustomResourceTypeTestcase(WebResource path,
-                                        BufferedClientResponse response) {
+                                        ClientResponse response) {
     this.path = path;
-    this.response = response;
-    this.parsedResponse = response.getEntity(JSONObject.class);
+    this.response = new BufferedClientResponse(response);
+    this.parsedResponse = this.response.getEntity(JSONObject.class);
   }
 
-  public void verify(Consumer<JSONObject> verifier) {
+  public void verify(Consumer<ResponseAdapter> verifier) {
     assertEquals(MediaType.APPLICATION_JSON_TYPE + "; " + JettyUtils.UTF_8,
         response.getType().toString());
 
@@ -64,7 +67,8 @@ public class JsonCustomResourceTypeTestcase {
     if (responseStr == null || responseStr.isEmpty()) {
       throw new IllegalStateException("Response is null or empty!");
     }
-    verifier.accept(parsedResponse);
+    ResponseAdapter responseAdapter = new JsonResponseAdapter(response);
+    verifier.accept(responseAdapter);
   }
 
   private void logResponse() {

@@ -37,25 +37,28 @@ import org.apache.hadoop.yarn.server.resourcemanager.scheduler.ResourceScheduler
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.fifo.FifoScheduler;
 import org.apache.hadoop.yarn.server.resourcemanager.webapp.dao.AppInfo;
 import org.apache.hadoop.yarn.server.resourcemanager.webapp.fairscheduler.CustomResourceTypesConfigurationProvider;
-import org.apache.hadoop.yarn.server.resourcemanager.webapp.helper.AppInfoJsonVerifications;
-import org.apache.hadoop.yarn.server.resourcemanager.webapp.helper.AppInfoXmlVerifications;
-import org.apache.hadoop.yarn.server.resourcemanager.webapp.helper.BufferedClientResponse;
-import org.apache.hadoop.yarn.server.resourcemanager.webapp.helper.JsonCustomResourceTypeTestcase;
-import org.apache.hadoop.yarn.server.resourcemanager.webapp.helper.ResourceRequestsJsonVerifications;
-import org.apache.hadoop.yarn.server.resourcemanager.webapp.helper.ResourceRequestsXmlVerifications;
-import org.apache.hadoop.yarn.server.resourcemanager.webapp.helper.XmlCustomResourceTypeTestCase;
+
+
+import org.apache.hadoop.yarn.server.resourcemanager.webapp
+    .representationhelper.AppInfoVerifications;
+import org.apache.hadoop.yarn.server.resourcemanager.webapp.representationhelper.ArrayWrapper;
+import org.apache.hadoop.yarn.server.resourcemanager.webapp.representationhelper
+    .BufferedClientResponse;
+import org.apache.hadoop.yarn.server.resourcemanager.webapp.representationhelper.ElementWrapper;
+
+
+import org.apache.hadoop.yarn.server.resourcemanager.webapp.representationhelper
+    .JsonCustomResourceTypeTestcase;
+import org.apache.hadoop.yarn.server.resourcemanager.webapp
+    .representationhelper.ResourceRequestsVerifications;
+import org.apache.hadoop.yarn.server.resourcemanager.webapp.representationhelper
+    .XmlCustomResourceTypeTestCase;
 import org.apache.hadoop.yarn.util.resource.ResourceUtils;
 import org.apache.hadoop.yarn.webapp.GenericExceptionHandler;
 import org.apache.hadoop.yarn.webapp.GuiceServletConfig;
 import org.apache.hadoop.yarn.webapp.JerseyTestBase;
-import org.codehaus.jettison.json.JSONArray;
-import org.codehaus.jettison.json.JSONException;
-import org.codehaus.jettison.json.JSONObject;
 import org.junit.Before;
 import org.junit.Test;
-import org.w3c.dom.Element;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
 
 import javax.ws.rs.core.MediaType;
 import java.util.ArrayList;
@@ -64,11 +67,12 @@ import static org.junit.Assert.assertEquals;
 
 /**
  * This test verifies that custom resource types are correctly serialized to XML
- * and JSON when HTTP GET request is sent to the resource: ws/v1/cluster/apps.
+ * and json when HTTP GET request is sent to the resource: ws/v1/cluster/apps.
  */
 public class TestRMWebServicesAppsCustomResourceTypes extends JerseyTestBase {
 
   private static MockRM rm;
+
   private static final int CONTAINER_MB = 1024;
 
   private static class WebServletModule extends ServletModule {
@@ -94,7 +98,7 @@ public class TestRMWebServicesAppsCustomResourceTypes extends JerseyTestBase {
       ResourceUtils.resetResourceTypes(conf);
     }
   }
-
+  
   @Before
   @Override
   public void setUp() throws Exception {
@@ -104,7 +108,7 @@ public class TestRMWebServicesAppsCustomResourceTypes extends JerseyTestBase {
 
   private void createInjectorForWebServletModule() {
     GuiceServletConfig
-        .setInjector(Guice.createInjector(new WebServletModule()));
+            .setInjector(Guice.createInjector(new WebServletModule()));
   }
 
   public TestRMWebServicesAppsCustomResourceTypes() {
@@ -129,18 +133,16 @@ public class TestRMWebServicesAppsCustomResourceTypes extends JerseyTestBase {
     ClientResponse response =
         path.accept(MediaType.APPLICATION_XML).get(ClientResponse.class);
 
-    XmlCustomResourceTypeTestCase testCase =
-            new XmlCustomResourceTypeTestCase(path,
-                    new BufferedClientResponse(response));
-    testCase.verify(document -> {
-      NodeList apps = document.getElementsByTagName("apps");
-      assertEquals("incorrect number of apps elements", 1, apps.getLength());
+    XmlCustomResourceTypeTestCase testCase = new XmlCustomResourceTypeTestCase(
+        path, response);
+    testCase.verify(responseAdapter -> {
+      ArrayWrapper arrayWrapper = responseAdapter.getArray("apps[]");
+      assertEquals("incorrect number of elements", 1, arrayWrapper.length());
 
-      NodeList appArray = ((Element)(apps.item(0)))
-              .getElementsByTagName("app");
-      assertEquals("incorrect number of app elements", 1, appArray.getLength());
+      ArrayWrapper appArray = responseAdapter.getArray("apps.app[]");
+      assertEquals("incorrect number of elements", 1, appArray.length());
 
-      verifyAppsXML(appArray, app1);
+      verifyAppsXML(arrayWrapper, app1);
     });
 
     rm.stop();
@@ -161,62 +163,54 @@ public class TestRMWebServicesAppsCustomResourceTypes extends JerseyTestBase {
         path.accept(MediaType.APPLICATION_JSON).get(ClientResponse.class);
 
     JsonCustomResourceTypeTestcase testCase =
-        new JsonCustomResourceTypeTestcase(path,
-            new BufferedClientResponse(response));
-    testCase.verify(json -> {
-      try {
-        assertEquals("incorrect number of apps elements", 1, json.length());
-        JSONObject apps = json.getJSONObject("apps");
-        assertEquals("incorrect number of app elements", 1, apps.length());
-        JSONArray array = apps.getJSONArray("app");
-        assertEquals("incorrect count of app", 1, array.length());
+        new JsonCustomResourceTypeTestcase(path, response);
+    testCase.verify(responseAdapter -> {
+      assertEquals("incorrect number of elements", 1,
+          responseAdapter.getElement("apps").length());
+      ArrayWrapper appArray = responseAdapter.getArray("apps.app[]");
+      assertEquals("incorrect number of elements", 1, appArray.length());
 
-        verifyAppInfoJson(array.getJSONObject(0), app1);
-      } catch (JSONException e) {
-        throw new RuntimeException(e);
-      }
+      verifyAppInfoJson(appArray.getObjectAtIndex(0), app1);
     });
 
     rm.stop();
   }
 
-  private void verifyAppsXML(NodeList appArray, RMApp app) {
-    for (int i = 0; i < appArray.getLength(); i++) {
-      Element element = (Element) appArray.item(i);
-      AppInfoXmlVerifications.verify(element, app);
+  private void verifyAppsXML(ArrayWrapper array, RMApp app) {
+    for (int i = 0; i < array.length(); i++) {
+      ElementWrapper element = array.getObjectAtIndex(i);
+      AppInfoVerifications.verify(element, app);
 
-      NodeList resourceRequests =
-          element.getElementsByTagName("resourceRequests");
-      assertEquals(1, resourceRequests.getLength());
-      Node resourceRequest = resourceRequests.item(0);
+      ArrayWrapper resourceRequests = element.getChildArray("resourceRequests");
+      assertEquals(resourceRequests.length(), 1);
+      ElementWrapper resourceRequest = resourceRequests.getObjectAtIndex(0);
       ResourceRequest rr =
           ((AbstractYarnScheduler) rm.getRMContext().getScheduler())
               .getApplicationAttempt(
                   app.getCurrentAppAttempt().getAppAttemptId())
               .getAppSchedulingInfo().getAllResourceRequests().get(0);
-      ResourceRequestsXmlVerifications.verifyWithCustomResourceTypes(
-              (Element) resourceRequest, rr,
+      ResourceRequestsVerifications.verifyWithCustomResourceTypes(
+          resourceRequest, rr,
           CustomResourceTypesConfigurationProvider.getCustomResourceTypes());
     }
   }
 
-  private void verifyAppInfoJson(JSONObject info, RMApp app) throws
-          JSONException {
+  private void verifyAppInfoJson(ElementWrapper info, RMApp app) {
     int expectedNumberOfElements = getExpectedNumberOfElements(app);
 
     assertEquals("incorrect number of elements", expectedNumberOfElements,
         info.length());
 
-    AppInfoJsonVerifications.verify(info, app);
+    AppInfoVerifications.verify(info, app);
 
-    JSONArray resourceRequests = info.getJSONArray("resourceRequests");
-    JSONObject requestInfo = resourceRequests.getJSONObject(0);
+    ArrayWrapper resourceRequests = info.getChildArray("resourceRequests");
+    ElementWrapper requestInfo = resourceRequests.getObjectAtIndex(0);
     ResourceRequest rr =
         ((AbstractYarnScheduler) rm.getRMContext().getScheduler())
             .getApplicationAttempt(app.getCurrentAppAttempt().getAppAttemptId())
             .getAppSchedulingInfo().getAllResourceRequests().get(0);
 
-    ResourceRequestsJsonVerifications.verifyWithCustomResourceTypes(
+    ResourceRequestsVerifications.verifyWithCustomResourceTypes(
             requestInfo, rr,
             CustomResourceTypesConfigurationProvider.getCustomResourceTypes());
   }

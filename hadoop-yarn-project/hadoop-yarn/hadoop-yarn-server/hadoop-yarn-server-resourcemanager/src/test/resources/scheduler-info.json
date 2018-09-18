@@ -1,0 +1,2064 @@
+{
+    "scheduler": {
+        "schedulerInfo": {
+            "rootQueue": {
+                "allocatedContainers": 0,
+                "amMaxResources": {
+                    "memory": 0,
+                    "resourceInformations": {
+                        "resourceInformation": [
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "memory-mb",
+                                "resourceType": "COUNTABLE",
+                                "units": "Mi",
+                                "value": 0
+                            },
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "vcores",
+                                "resourceType": "COUNTABLE",
+                                "units": "",
+                                "value": 0
+                            },
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "customResource-0",
+                                "resourceType": "COUNTABLE",
+                                "units": "k",
+                                "value": 0
+                            },
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "customResource-1",
+                                "resourceType": "COUNTABLE",
+                                "units": "k",
+                                "value": 0
+                            }
+                        ]
+                    },
+                    "vCores": 0
+                },
+                "amUsedResources": {
+                    "memory": 0,
+                    "resourceInformations": {
+                        "resourceInformation": [
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "memory-mb",
+                                "resourceType": "COUNTABLE",
+                                "units": "Mi",
+                                "value": 0
+                            },
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "vcores",
+                                "resourceType": "COUNTABLE",
+                                "units": "",
+                                "value": 0
+                            },
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "customResource-0",
+                                "resourceType": "COUNTABLE",
+                                "units": "k",
+                                "value": 0
+                            },
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "customResource-1",
+                                "resourceType": "COUNTABLE",
+                                "units": "k",
+                                "value": 0
+                            }
+                        ]
+                    },
+                    "vCores": 0
+                },
+                "childQueues": {
+                    "queue": [
+                        {
+                            "allocatedContainers": 0,
+                            "amMaxResources": {
+                                "memory": 0,
+                                "resourceInformations": {
+                                    "resourceInformation": [
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "memory-mb",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "Mi",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "vcores",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-0",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-1",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        }
+                                    ]
+                                },
+                                "vCores": 0
+                            },
+                            "amUsedResources": {
+                                "memory": 0,
+                                "resourceInformations": {
+                                    "resourceInformation": [
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "memory-mb",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "Mi",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "vcores",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-0",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-1",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        }
+                                    ]
+                                },
+                                "vCores": 0
+                            },
+                            "clusterResources": {
+                                "memory": 0,
+                                "resourceInformations": {
+                                    "resourceInformation": [
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "memory-mb",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "Mi",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "vcores",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-0",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-1",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        }
+                                    ]
+                                },
+                                "vCores": 0
+                            },
+                            "demandResources": {
+                                "memory": 0,
+                                "resourceInformations": {
+                                    "resourceInformation": [
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "memory-mb",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "Mi",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "vcores",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-0",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-1",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        }
+                                    ]
+                                },
+                                "vCores": 0
+                            },
+                            "fairResources": {
+                                "memory": 0,
+                                "resourceInformations": {
+                                    "resourceInformation": [
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "memory-mb",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "Mi",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "vcores",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-0",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-1",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        }
+                                    ]
+                                },
+                                "vCores": 0
+                            },
+                            "maxApps": 2147483647,
+                            "maxResources": {
+                                "memory": 0,
+                                "resourceInformations": {
+                                    "resourceInformation": [
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "memory-mb",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "Mi",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "vcores",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-0",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-1",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        }
+                                    ]
+                                },
+                                "vCores": 0
+                            },
+                            "minResources": {
+                                "memory": 0,
+                                "resourceInformations": {
+                                    "resourceInformation": [
+                                        {
+                                            "maximumAllocation": 8192,
+                                            "minimumAllocation": 1024,
+                                            "name": "memory-mb",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "Mi",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 4,
+                                            "minimumAllocation": 1,
+                                            "name": "vcores",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-0",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-1",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        }
+                                    ]
+                                },
+                                "vCores": 0
+                            },
+                            "numActiveApps": 0,
+                            "numPendingApps": 0,
+                            "preemptable": true,
+                            "queueName": "root.default",
+                            "reservedContainers": 0,
+                            "reservedResources": {
+                                "memory": 0,
+                                "resourceInformations": {
+                                    "resourceInformation": [
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "memory-mb",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "Mi",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "vcores",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-0",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-1",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        }
+                                    ]
+                                },
+                                "vCores": 0
+                            },
+                            "schedulingPolicy": "fair",
+                            "steadyFairResources": {
+                                "memory": 0,
+                                "resourceInformations": {
+                                    "resourceInformation": [
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "memory-mb",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "Mi",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "vcores",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-0",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-1",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        }
+                                    ]
+                                },
+                                "vCores": 0
+                            },
+                            "type": "fairSchedulerLeafQueueInfo",
+                            "usedResources": {
+                                "memory": 0,
+                                "resourceInformations": {
+                                    "resourceInformation": [
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "memory-mb",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "Mi",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "vcores",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-0",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-1",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        }
+                                    ]
+                                },
+                                "vCores": 0
+                            }
+                        },
+                        {
+                            "allocatedContainers": 0,
+                            "amMaxResources": {
+                                "memory": 0,
+                                "resourceInformations": {
+                                    "resourceInformation": [
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "memory-mb",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "Mi",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "vcores",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-0",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-1",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        }
+                                    ]
+                                },
+                                "vCores": 0
+                            },
+                            "amUsedResources": {
+                                "memory": 0,
+                                "resourceInformations": {
+                                    "resourceInformation": [
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "memory-mb",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "Mi",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "vcores",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-0",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-1",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        }
+                                    ]
+                                },
+                                "vCores": 0
+                            },
+                            "childQueues": {
+                                "queue": [
+                                    {
+                                        "allocatedContainers": 0,
+                                        "amMaxResources": {
+                                            "memory": 0,
+                                            "resourceInformations": {
+                                                "resourceInformation": [
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "memory-mb",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "Mi",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "vcores",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-0",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-1",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    }
+                                                ]
+                                            },
+                                            "vCores": 0
+                                        },
+                                        "amUsedResources": {
+                                            "memory": 0,
+                                            "resourceInformations": {
+                                                "resourceInformation": [
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "memory-mb",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "Mi",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "vcores",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-0",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-1",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    }
+                                                ]
+                                            },
+                                            "vCores": 0
+                                        },
+                                        "clusterResources": {
+                                            "memory": 0,
+                                            "resourceInformations": {
+                                                "resourceInformation": [
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "memory-mb",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "Mi",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "vcores",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-0",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-1",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    }
+                                                ]
+                                            },
+                                            "vCores": 0
+                                        },
+                                        "demandResources": {
+                                            "memory": 0,
+                                            "resourceInformations": {
+                                                "resourceInformation": [
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "memory-mb",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "Mi",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "vcores",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-0",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-1",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    }
+                                                ]
+                                            },
+                                            "vCores": 0
+                                        },
+                                        "fairResources": {
+                                            "memory": 0,
+                                            "resourceInformations": {
+                                                "resourceInformation": [
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "memory-mb",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "Mi",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "vcores",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-0",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-1",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    }
+                                                ]
+                                            },
+                                            "vCores": 0
+                                        },
+                                        "maxApps": 2147483647,
+                                        "maxResources": {
+                                            "memory": 0,
+                                            "resourceInformations": {
+                                                "resourceInformation": [
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "memory-mb",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "Mi",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "vcores",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-0",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-1",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    }
+                                                ]
+                                            },
+                                            "vCores": 0
+                                        },
+                                        "minResources": {
+                                            "memory": 0,
+                                            "resourceInformations": {
+                                                "resourceInformation": [
+                                                    {
+                                                        "maximumAllocation": 8192,
+                                                        "minimumAllocation": 1024,
+                                                        "name": "memory-mb",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "Mi",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 4,
+                                                        "minimumAllocation": 1,
+                                                        "name": "vcores",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-0",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-1",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    }
+                                                ]
+                                            },
+                                            "vCores": 0
+                                        },
+                                        "numActiveApps": 0,
+                                        "numPendingApps": 0,
+                                        "preemptable": true,
+                                        "queueName": "root.q.subqueue1",
+                                        "reservedContainers": 0,
+                                        "reservedResources": {
+                                            "memory": 0,
+                                            "resourceInformations": {
+                                                "resourceInformation": [
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "memory-mb",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "Mi",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "vcores",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-0",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-1",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    }
+                                                ]
+                                            },
+                                            "vCores": 0
+                                        },
+                                        "schedulingPolicy": "fair",
+                                        "steadyFairResources": {
+                                            "memory": 0,
+                                            "resourceInformations": {
+                                                "resourceInformation": [
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "memory-mb",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "Mi",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "vcores",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-0",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-1",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    }
+                                                ]
+                                            },
+                                            "vCores": 0
+                                        },
+                                        "type": "fairSchedulerLeafQueueInfo",
+                                        "usedResources": {
+                                            "memory": 20,
+                                            "resourceInformations": {
+                                                "resourceInformation": [
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "memory-mb",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "Mi",
+                                                        "value": 20
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "vcores",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "",
+                                                        "value": 30
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-0",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 33
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-1",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 33
+                                                    }
+                                                ]
+                                            },
+                                            "vCores": 30
+                                        }
+                                    },
+                                    {
+                                        "allocatedContainers": 0,
+                                        "amMaxResources": {
+                                            "memory": 0,
+                                            "resourceInformations": {
+                                                "resourceInformation": [
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "memory-mb",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "Mi",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "vcores",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-0",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-1",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    }
+                                                ]
+                                            },
+                                            "vCores": 0
+                                        },
+                                        "amUsedResources": {
+                                            "memory": 0,
+                                            "resourceInformations": {
+                                                "resourceInformation": [
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "memory-mb",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "Mi",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "vcores",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-0",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-1",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    }
+                                                ]
+                                            },
+                                            "vCores": 0
+                                        },
+                                        "clusterResources": {
+                                            "memory": 0,
+                                            "resourceInformations": {
+                                                "resourceInformation": [
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "memory-mb",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "Mi",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "vcores",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-0",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-1",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    }
+                                                ]
+                                            },
+                                            "vCores": 0
+                                        },
+                                        "demandResources": {
+                                            "memory": 0,
+                                            "resourceInformations": {
+                                                "resourceInformation": [
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "memory-mb",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "Mi",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "vcores",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-0",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-1",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    }
+                                                ]
+                                            },
+                                            "vCores": 0
+                                        },
+                                        "fairResources": {
+                                            "memory": 0,
+                                            "resourceInformations": {
+                                                "resourceInformation": [
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "memory-mb",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "Mi",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "vcores",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-0",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-1",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    }
+                                                ]
+                                            },
+                                            "vCores": 0
+                                        },
+                                        "maxApps": 2147483647,
+                                        "maxResources": {
+                                            "memory": 0,
+                                            "resourceInformations": {
+                                                "resourceInformation": [
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "memory-mb",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "Mi",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "vcores",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-0",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-1",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    }
+                                                ]
+                                            },
+                                            "vCores": 0
+                                        },
+                                        "minResources": {
+                                            "memory": 0,
+                                            "resourceInformations": {
+                                                "resourceInformation": [
+                                                    {
+                                                        "maximumAllocation": 8192,
+                                                        "minimumAllocation": 1024,
+                                                        "name": "memory-mb",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "Mi",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 4,
+                                                        "minimumAllocation": 1,
+                                                        "name": "vcores",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-0",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-1",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    }
+                                                ]
+                                            },
+                                            "vCores": 0
+                                        },
+                                        "numActiveApps": 0,
+                                        "numPendingApps": 0,
+                                        "preemptable": true,
+                                        "queueName": "root.q.subqueue2",
+                                        "reservedContainers": 0,
+                                        "reservedResources": {
+                                            "memory": 0,
+                                            "resourceInformations": {
+                                                "resourceInformation": [
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "memory-mb",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "Mi",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "vcores",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-0",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-1",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    }
+                                                ]
+                                            },
+                                            "vCores": 0
+                                        },
+                                        "schedulingPolicy": "fair",
+                                        "steadyFairResources": {
+                                            "memory": 0,
+                                            "resourceInformations": {
+                                                "resourceInformation": [
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "memory-mb",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "Mi",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "vcores",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-0",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-1",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    }
+                                                ]
+                                            },
+                                            "vCores": 0
+                                        },
+                                        "type": "fairSchedulerLeafQueueInfo",
+                                        "usedResources": {
+                                            "memory": 0,
+                                            "resourceInformations": {
+                                                "resourceInformation": [
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "memory-mb",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "Mi",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "vcores",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-0",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    },
+                                                    {
+                                                        "maximumAllocation": 9223372036854775807,
+                                                        "minimumAllocation": 0,
+                                                        "name": "customResource-1",
+                                                        "resourceType": "COUNTABLE",
+                                                        "units": "k",
+                                                        "value": 0
+                                                    }
+                                                ]
+                                            },
+                                            "vCores": 0
+                                        }
+                                    }
+                                ]
+                            },
+                            "clusterResources": {
+                                "memory": 0,
+                                "resourceInformations": {
+                                    "resourceInformation": [
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "memory-mb",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "Mi",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "vcores",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-0",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-1",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        }
+                                    ]
+                                },
+                                "vCores": 0
+                            },
+                            "demandResources": {
+                                "memory": 0,
+                                "resourceInformations": {
+                                    "resourceInformation": [
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "memory-mb",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "Mi",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "vcores",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-0",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-1",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        }
+                                    ]
+                                },
+                                "vCores": 0
+                            },
+                            "fairResources": {
+                                "memory": 0,
+                                "resourceInformations": {
+                                    "resourceInformation": [
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "memory-mb",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "Mi",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "vcores",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-0",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-1",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        }
+                                    ]
+                                },
+                                "vCores": 0
+                            },
+                            "maxApps": 2147483647,
+                            "maxResources": {
+                                "memory": 0,
+                                "resourceInformations": {
+                                    "resourceInformation": [
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "memory-mb",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "Mi",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "vcores",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-0",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-1",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        }
+                                    ]
+                                },
+                                "vCores": 0
+                            },
+                            "minResources": {
+                                "memory": 0,
+                                "resourceInformations": {
+                                    "resourceInformation": [
+                                        {
+                                            "maximumAllocation": 8192,
+                                            "minimumAllocation": 1024,
+                                            "name": "memory-mb",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "Mi",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 4,
+                                            "minimumAllocation": 1,
+                                            "name": "vcores",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-0",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-1",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        }
+                                    ]
+                                },
+                                "vCores": 0
+                            },
+                            "preemptable": true,
+                            "queueName": "root.q",
+                            "reservedContainers": 0,
+                            "reservedResources": {
+                                "memory": 0,
+                                "resourceInformations": {
+                                    "resourceInformation": [
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "memory-mb",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "Mi",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "vcores",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-0",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-1",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        }
+                                    ]
+                                },
+                                "vCores": 0
+                            },
+                            "schedulingPolicy": "fair",
+                            "steadyFairResources": {
+                                "memory": 0,
+                                "resourceInformations": {
+                                    "resourceInformation": [
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "memory-mb",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "Mi",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "vcores",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-0",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-1",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 0
+                                        }
+                                    ]
+                                },
+                                "vCores": 0
+                            },
+                            "usedResources": {
+                                "memory": 20,
+                                "resourceInformations": {
+                                    "resourceInformation": [
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "memory-mb",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "Mi",
+                                            "value": 20
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "vcores",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "",
+                                            "value": 30
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-0",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 33
+                                        },
+                                        {
+                                            "maximumAllocation": 9223372036854775807,
+                                            "minimumAllocation": 0,
+                                            "name": "customResource-1",
+                                            "resourceType": "COUNTABLE",
+                                            "units": "k",
+                                            "value": 33
+                                        }
+                                    ]
+                                },
+                                "vCores": 30
+                            }
+                        }
+                    ]
+                },
+                "clusterResources": {
+                    "memory": 0,
+                    "resourceInformations": {
+                        "resourceInformation": [
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "memory-mb",
+                                "resourceType": "COUNTABLE",
+                                "units": "Mi",
+                                "value": 0
+                            },
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "vcores",
+                                "resourceType": "COUNTABLE",
+                                "units": "",
+                                "value": 0
+                            },
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "customResource-0",
+                                "resourceType": "COUNTABLE",
+                                "units": "k",
+                                "value": 0
+                            },
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "customResource-1",
+                                "resourceType": "COUNTABLE",
+                                "units": "k",
+                                "value": 0
+                            }
+                        ]
+                    },
+                    "vCores": 0
+                },
+                "demandResources": {
+                    "memory": 0,
+                    "resourceInformations": {
+                        "resourceInformation": [
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "memory-mb",
+                                "resourceType": "COUNTABLE",
+                                "units": "Mi",
+                                "value": 0
+                            },
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "vcores",
+                                "resourceType": "COUNTABLE",
+                                "units": "",
+                                "value": 0
+                            },
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "customResource-0",
+                                "resourceType": "COUNTABLE",
+                                "units": "k",
+                                "value": 0
+                            },
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "customResource-1",
+                                "resourceType": "COUNTABLE",
+                                "units": "k",
+                                "value": 0
+                            }
+                        ]
+                    },
+                    "vCores": 0
+                },
+                "fairResources": {
+                    "memory": 0,
+                    "resourceInformations": {
+                        "resourceInformation": [
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "memory-mb",
+                                "resourceType": "COUNTABLE",
+                                "units": "Mi",
+                                "value": 0
+                            },
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "vcores",
+                                "resourceType": "COUNTABLE",
+                                "units": "",
+                                "value": 0
+                            },
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "customResource-0",
+                                "resourceType": "COUNTABLE",
+                                "units": "k",
+                                "value": 0
+                            },
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "customResource-1",
+                                "resourceType": "COUNTABLE",
+                                "units": "k",
+                                "value": 0
+                            }
+                        ]
+                    },
+                    "vCores": 0
+                },
+                "maxApps": 2147483647,
+                "maxResources": {
+                    "memory": 0,
+                    "resourceInformations": {
+                        "resourceInformation": [
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "memory-mb",
+                                "resourceType": "COUNTABLE",
+                                "units": "Mi",
+                                "value": 0
+                            },
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "vcores",
+                                "resourceType": "COUNTABLE",
+                                "units": "",
+                                "value": 0
+                            },
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "customResource-0",
+                                "resourceType": "COUNTABLE",
+                                "units": "k",
+                                "value": 0
+                            },
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "customResource-1",
+                                "resourceType": "COUNTABLE",
+                                "units": "k",
+                                "value": 0
+                            }
+                        ]
+                    },
+                    "vCores": 0
+                },
+                "minResources": {
+                    "memory": 0,
+                    "resourceInformations": {
+                        "resourceInformation": [
+                            {
+                                "maximumAllocation": 8192,
+                                "minimumAllocation": 1024,
+                                "name": "memory-mb",
+                                "resourceType": "COUNTABLE",
+                                "units": "Mi",
+                                "value": 0
+                            },
+                            {
+                                "maximumAllocation": 4,
+                                "minimumAllocation": 1,
+                                "name": "vcores",
+                                "resourceType": "COUNTABLE",
+                                "units": "",
+                                "value": 0
+                            },
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "customResource-0",
+                                "resourceType": "COUNTABLE",
+                                "units": "k",
+                                "value": 0
+                            },
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "customResource-1",
+                                "resourceType": "COUNTABLE",
+                                "units": "k",
+                                "value": 0
+                            }
+                        ]
+                    },
+                    "vCores": 0
+                },
+                "preemptable": true,
+                "queueName": "root",
+                "reservedContainers": 0,
+                "reservedResources": {
+                    "memory": 0,
+                    "resourceInformations": {
+                        "resourceInformation": [
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "memory-mb",
+                                "resourceType": "COUNTABLE",
+                                "units": "Mi",
+                                "value": 0
+                            },
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "vcores",
+                                "resourceType": "COUNTABLE",
+                                "units": "",
+                                "value": 0
+                            },
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "customResource-0",
+                                "resourceType": "COUNTABLE",
+                                "units": "k",
+                                "value": 0
+                            },
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "customResource-1",
+                                "resourceType": "COUNTABLE",
+                                "units": "k",
+                                "value": 0
+                            }
+                        ]
+                    },
+                    "vCores": 0
+                },
+                "schedulingPolicy": "fair",
+                "steadyFairResources": {
+                    "memory": 0,
+                    "resourceInformations": {
+                        "resourceInformation": [
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "memory-mb",
+                                "resourceType": "COUNTABLE",
+                                "units": "Mi",
+                                "value": 0
+                            },
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "vcores",
+                                "resourceType": "COUNTABLE",
+                                "units": "",
+                                "value": 0
+                            },
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "customResource-0",
+                                "resourceType": "COUNTABLE",
+                                "units": "k",
+                                "value": 0
+                            },
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "customResource-1",
+                                "resourceType": "COUNTABLE",
+                                "units": "k",
+                                "value": 0
+                            }
+                        ]
+                    },
+                    "vCores": 0
+                },
+                "usedResources": {
+                    "memory": 20,
+                    "resourceInformations": {
+                        "resourceInformation": [
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "memory-mb",
+                                "resourceType": "COUNTABLE",
+                                "units": "Mi",
+                                "value": 20
+                            },
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "vcores",
+                                "resourceType": "COUNTABLE",
+                                "units": "",
+                                "value": 30
+                            },
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "customResource-0",
+                                "resourceType": "COUNTABLE",
+                                "units": "k",
+                                "value": 33
+                            },
+                            {
+                                "maximumAllocation": 9223372036854775807,
+                                "minimumAllocation": 0,
+                                "name": "customResource-1",
+                                "resourceType": "COUNTABLE",
+                                "units": "k",
+                                "value": 33
+                            }
+                        ]
+                    },
+                    "vCores": 30
+                }
+            },
+            "type": "fairScheduler"
+        }
+    }
+}
