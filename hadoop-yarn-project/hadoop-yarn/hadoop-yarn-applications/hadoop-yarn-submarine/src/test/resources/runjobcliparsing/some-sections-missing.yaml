@@ -1,0 +1,32 @@
+spec:
+  name: testJobName
+  job_type: testJobType
+  
+configs:
+  input_path: testInputPath
+  checkpoint_path: testCheckpointPath
+  saved_model_path: testSavedModelPath
+  docker_image: testDockerImage
+  quicklinks:
+  - Notebook_UI=https://master-0:7070
+  - Notebook_UI2=https://master-0:7071
+  wait_job_finish: true
+  envs:
+    env1: 'env1Value'
+    env2: 'env2Value'
+  localizations:
+  - hdfs://remote-file1:/local-filename1:rw
+  - nfs://remote-file2:/local-filename2:rw
+  mounts:
+  - /etc/passwd:/etc/passwd:rw
+  - /etc/hosts:/etc/hosts:rw
+
+roles:
+  worker:
+    resources: memory=20480,vcores=32,gpu=2
+    replicas: 3
+    launch_cmd: testLaunchCmdWorker
+  ps:
+    resources: memory=20500,vcores=34,gpu=4
+    replicas: 4
+    launch_cmd: testLaunchCmdPs

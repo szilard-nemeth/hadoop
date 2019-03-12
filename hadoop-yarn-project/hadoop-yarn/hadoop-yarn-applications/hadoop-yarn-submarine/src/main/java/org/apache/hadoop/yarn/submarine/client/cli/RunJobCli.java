@@ -20,9 +20,13 @@ import org.apache.commons.cli.GnuParser;
 import org.apache.commons.cli.HelpFormatter;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
+import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.yarn.api.records.ApplicationId;
 import org.apache.hadoop.yarn.exceptions.YarnException;
+import org.apache.hadoop.yarn.submarine.client.cli.param.ParametersHolder;
 import org.apache.hadoop.yarn.submarine.client.cli.param.RunJobParameters;
+import org.apache.hadoop.yarn.submarine.client.cli.param.yaml.YamlConfigFile;
+import org.apache.hadoop.yarn.submarine.client.cli.param.yaml.YamlParseException;
 import org.apache.hadoop.yarn.submarine.common.ClientContext;
 import org.apache.hadoop.yarn.submarine.common.exception.SubmarineException;
 import org.apache.hadoop.yarn.submarine.runtimes.common.JobMonitor;
@@ -30,7 +34,10 @@ import org.apache.hadoop.yarn.submarine.runtimes.common.JobSubmitter;
 import org.apache.hadoop.yarn.submarine.runtimes.common.StorageKeyConstants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.yaml.snakeyaml.Yaml;
+import org.yaml.snakeyaml.constructor.Constructor;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
@@ -54,7 +61,7 @@ public class RunJobCli extends AbstractCli {
   public RunJobCli(ClientContext cliContext, JobSubmitter jobSubmitter,
       JobMonitor jobMonitor) {
     super(cliContext);
-    options = generateOptions();
+    this.options = generateOptions();
     this.jobSubmitter = jobSubmitter;
     this.jobMonitor = jobMonitor;
   }
@@ -65,6 +72,7 @@ public class RunJobCli extends AbstractCli {
 
   private Options generateOptions() {
     Options options = new Options();
+    options.addOption(CliConstants.SPEC_FILE, true, "Spec file (in YAML format)");
     options.addOption(CliConstants.NAME, true, "Name of the job");
     options.addOption(CliConstants.INPUT_PATH, true,
         "Input of the job, could be local or other FS directory");
@@ -119,7 +127,7 @@ public class RunJobCli extends AbstractCli {
             + "uses --" + CliConstants.DOCKER_IMAGE + " as default.");
     options.addOption(CliConstants.QUICKLINK, true, "Specify quicklink so YARN"
         + "web UI shows link to given role instance and port. When "
-        + "--tensorboard is speciied, quicklink to tensorboard instance will "
+        + "--tensorboard is specified, quicklink to tensorboard instance will "
         + "be added automatically. The format of quick link is: "
         + "Quick_link_label=http(or https)://role-name:port. For example, "
         + "if want to link to first worker's 7070 port, and text of quicklink "
@@ -149,7 +157,7 @@ public class RunJobCli extends AbstractCli {
         "by the job under security environment");
     options.addOption(CliConstants.DISTRIBUTE_KEYTAB, false, "Distribute " +
         "local keytab to cluster machines for service authentication. If not " +
-        "sepcified, pre-destributed keytab of which path specified by" +
+        "specified, pre-destributed keytab of which path specified by" +
         " parameter" + CliConstants.KEYTAB + " on cluster machines will be " +
         "used");
     options.addOption("h", "help", false, "Print help");
@@ -180,10 +188,11 @@ public class RunJobCli extends AbstractCli {
       // Do parsing
       GnuParser parser = new GnuParser();
       CommandLine cli = parser.parse(options, args);
-      parameters.updateParametersByParsedCommandline(cli, options,
+      ParametersHolder parametersHolder = createParametersHolder(cli);
+      parameters.updateParametersByParsedCommandline(parametersHolder,
           clientContext);
     } catch (ParseException e) {
-      LOG.error("Exception in parse:", e.getMessage());
+      LOG.error("Exception in parse: {}", e.getMessage());
       printUsages();
       throw e;
     }
@@ -193,6 +202,41 @@ public class RunJobCli extends AbstractCli {
 
     // replace patterns
     replacePatternsInParameters();
+  }
+
+  private ParametersHolder createParametersHolder(CommandLine cli) throws IOException {
+    String yamlConfigFile =
+        cli.getOptionValue(CliConstants.SPEC_FILE);
+    if (yamlConfigFile != null) {
+      YamlConfigFile yamlConfig = readYamlConfigFile(yamlConfigFile);
+      if (yamlConfig == null) {
+        throw new YamlParseException(String.format("YAML config is null, the " +
+            "YAML file '%s' is most likely empty!", yamlConfigFile));
+      } else if (yamlConfig.getConfigs() == null) {
+        throw new YamlParseException(String.format(
+            "Config section should be defined, but it cannot be found in " +
+            "YAML file '%s'!", yamlConfigFile));
+      }
+      LOG.info("Using YAML configuration!");
+      return ParametersHolder.createWithCmdLineAndYaml(cli, yamlConfig);
+    } else {
+      LOG.info("Using CLI configuration!");
+      return ParametersHolder.createWithCmdLine(cli);
+    }
+  }
+
+  private YamlConfigFile readYamlConfigFile(String filename) throws IOException {
+    Constructor constructor = new Constructor(YamlConfigFile.class);
+    constructor.setPropertyUtils(new RunJobParameters.UnderscoreConverterPropertyUtils());
+    try {
+      LOG.info("Reading YAML configuration from file: {}", filename);
+      Yaml yaml = new Yaml(constructor);
+      return yaml.loadAs(FileUtils.openInputStream(new File(filename)), YamlConfigFile.class);
+    } catch (Exception e) {
+      LOG.error("Exception while parsing YAML file {}: {}", filename, e.getMessage());
+      throw new YamlParseException(String.format("Failed to parse YAML file " +
+          "%s", filename), e);
+    }
   }
 
   private void setDefaultDirs() throws IOException {

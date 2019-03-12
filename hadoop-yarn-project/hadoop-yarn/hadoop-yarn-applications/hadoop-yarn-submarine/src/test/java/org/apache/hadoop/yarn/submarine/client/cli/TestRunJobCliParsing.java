@@ -19,9 +19,13 @@
 
 package org.apache.hadoop.yarn.submarine.client.cli;
 
+import com.google.common.collect.ImmutableMap;
 import org.apache.commons.cli.ParseException;
 import org.apache.hadoop.yarn.api.records.ApplicationId;
+import org.apache.hadoop.yarn.api.records.ResourceInformation;
+import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.apache.hadoop.yarn.exceptions.YarnException;
+import org.apache.hadoop.yarn.resourcetypes.ResourceTypesTestHelper;
 import org.apache.hadoop.yarn.submarine.client.cli.param.RunJobParameters;
 import org.apache.hadoop.yarn.submarine.common.MockClientContext;
 import org.apache.hadoop.yarn.submarine.common.conf.SubmarineLogs;
@@ -32,15 +36,23 @@ import org.apache.hadoop.yarn.submarine.runtimes.common.SubmarineStorage;
 import org.apache.hadoop.yarn.util.resource.Resources;
 import org.junit.Assert;
 import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
+import java.io.File;
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
 
+import static org.apache.hadoop.yarn.conf.YarnConfiguration.DEFAULT_RM_SCHEDULER_MAXIMUM_ALLOCATION_MB;
+import static org.apache.hadoop.yarn.conf.YarnConfiguration.DEFAULT_RM_SCHEDULER_MAXIMUM_ALLOCATION_VCORES;
+import static org.junit.Assert.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 public class TestRunJobCliParsing {
+  
   @Before
   public void before() {
     SubmarineLogs.verboseOff();
@@ -56,7 +68,7 @@ public class TestRunJobCliParsing {
     runJobCli.printUsages();
   }
 
-  private MockClientContext getMockClientContext()
+  static MockClientContext getMockClientContext()
       throws IOException, YarnException {
     MockClientContext mockClientContext = new MockClientContext();
     JobSubmitter mockJobSubmitter = mock(JobSubmitter.class);
@@ -92,21 +104,21 @@ public class TestRunJobCliParsing {
 
     RunJobParameters jobRunParameters = runJobCli.getRunJobParameters();
 
-    Assert.assertEquals(jobRunParameters.getInputPath(), "hdfs://input");
-    Assert.assertEquals(jobRunParameters.getCheckpointPath(), "hdfs://output");
-    Assert.assertEquals(jobRunParameters.getNumPS(), 2);
-    Assert.assertEquals(jobRunParameters.getPSLaunchCmd(), "python run-ps.py");
-    Assert.assertEquals(Resources.createResource(4096, 4),
+    assertEquals(jobRunParameters.getInputPath(), "hdfs://input");
+    assertEquals(jobRunParameters.getCheckpointPath(), "hdfs://output");
+    assertEquals(jobRunParameters.getNumPS(), 2);
+    assertEquals(jobRunParameters.getPSLaunchCmd(), "python run-ps.py");
+    assertEquals(Resources.createResource(4096, 4),
         jobRunParameters.getPsResource());
-    Assert.assertEquals(jobRunParameters.getWorkerLaunchCmd(),
+    assertEquals(jobRunParameters.getWorkerLaunchCmd(),
         "python run-job.py");
-    Assert.assertEquals(Resources.createResource(2048, 2),
+    assertEquals(Resources.createResource(2048, 2),
         jobRunParameters.getWorkerResource());
-    Assert.assertEquals(jobRunParameters.getDockerImageName(),
+    assertEquals(jobRunParameters.getDockerImageName(),
         "tf-docker:1.1.0");
-    Assert.assertEquals(jobRunParameters.getKeytab(),
+    assertEquals(jobRunParameters.getKeytab(),
         "/keytab/path");
-    Assert.assertEquals(jobRunParameters.getPrincipal(),
+    assertEquals(jobRunParameters.getPrincipal(),
         "user/_HOST@domain.com");
     Assert.assertTrue(jobRunParameters.isDistributeKeytab());
     Assert.assertTrue(SubmarineLogs.isVerbose());
@@ -126,12 +138,12 @@ public class TestRunJobCliParsing {
 
     RunJobParameters jobRunParameters = runJobCli.getRunJobParameters();
 
-    Assert.assertEquals(jobRunParameters.getInputPath(), "hdfs://input");
-    Assert.assertEquals(jobRunParameters.getCheckpointPath(), "hdfs://output");
-    Assert.assertEquals(jobRunParameters.getNumWorkers(), 1);
-    Assert.assertEquals(jobRunParameters.getWorkerLaunchCmd(),
+    assertEquals(jobRunParameters.getInputPath(), "hdfs://input");
+    assertEquals(jobRunParameters.getCheckpointPath(), "hdfs://output");
+    assertEquals(jobRunParameters.getNumWorkers(), 1);
+    assertEquals(jobRunParameters.getWorkerLaunchCmd(),
         "python run-job.py");
-    Assert.assertEquals(Resources.createResource(4096, 2),
+    assertEquals(Resources.createResource(4096, 2),
         jobRunParameters.getWorkerResource());
     Assert.assertTrue(SubmarineLogs.isVerbose());
     Assert.assertTrue(jobRunParameters.isWaitJobFinish());
@@ -153,7 +165,7 @@ public class TestRunJobCliParsing {
       actualMessage = e.getMessage();
       e.printStackTrace();
     }
-    Assert.assertEquals(expectedErrorMessage, actualMessage);
+    assertEquals(expectedErrorMessage, actualMessage);
   }
 
   /**
@@ -190,11 +202,11 @@ public class TestRunJobCliParsing {
             "python run-ps.py --input=%input_path% --model_dir=%checkpoint_path%/model",
             "--verbose" });
 
-    Assert.assertEquals(
+    assertEquals(
         "python run-job.py --input=hdfs://input --model_dir=hdfs://output "
             + "--export_dir=hdfs://output/savedmodel",
         runJobCli.getRunJobParameters().getWorkerLaunchCmd());
-    Assert.assertEquals(
+    assertEquals(
         "python run-ps.py --input=hdfs://input --model_dir=hdfs://output/model",
         runJobCli.getRunJobParameters().getPSLaunchCmd());
   }
