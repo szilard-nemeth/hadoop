@@ -99,7 +99,7 @@ public abstract class AMSimulator extends TaskRunner.Task {
   protected long traceStartTimeMS;
   protected long traceFinishTimeMS;
   protected long simulateStartTimeMS;
-  protected long simulateFinishTimeMS;
+  protected long simulateFinishTimeMS = 0;
   // whether tracked in Metrics
   protected boolean isTracked;
   // progress
@@ -221,6 +221,16 @@ public abstract class AMSimulator extends TaskRunner.Task {
 
   @Override
   public void lastStep() throws Exception {
+    if (simulateFinishTimeMS != 0) {
+      // The finish time is already recorded.
+      // Different value from zero means lastStep was called before.
+      // We want to prevent lastStep to be called more than once.
+      // See YARN-10427 for more details.
+      LOG.warn("Method AMSimulator#lastStep was already called. " +
+          "Skipping execution of method for application: {}", appId);
+      return;
+    }
+
     LOG.info(String.format("Application %s is shutting down. lastStep " +
         "Stacktrace", appId), new Exception());
     // unregister tracking
