@@ -372,6 +372,7 @@ public abstract class AbstractYarnScheduler
       ContainerId containerId, SchedulerNode node) {
     readLock.lock();
     try {
+      LOG.info("Container launched. container: " + containerId + ", node: " + node);
       // Get the application for the finished container
       SchedulerApplicationAttempt application =
           getCurrentAttemptForContainer(containerId);
@@ -1033,7 +1034,9 @@ public abstract class AbstractYarnScheduler
    */
   private List<ContainerStatus> updateNewContainerInfo(RMNode nm,
       SchedulerNode schedulerNode) {
+    LOG.info("***AbstractYarnScheduler#updateNewContainerInfo: nm class: " + nm.getClass() + ", NM object: " + nm.toString());
     List<UpdatedContainerInfo> containerInfoList = nm.pullContainerUpdates();
+    LOG.info("***After nm.pullContainerUpdates::: containerInfoList: " + containerInfoList);
     List<ContainerStatus> newlyLaunchedContainers =
         new ArrayList<>();
     List<ContainerStatus> completedContainers =
@@ -1042,11 +1045,15 @@ public abstract class AbstractYarnScheduler
         new ArrayList<>();
 
     for(UpdatedContainerInfo containerInfo : containerInfoList) {
+      LOG.info("***Adding newly launched containers: " + containerInfo.getNewlyLaunchedContainers());
       newlyLaunchedContainers
           .addAll(containerInfo.getNewlyLaunchedContainers());
       completedContainers.addAll(containerInfo.getCompletedContainers());
       updateExistContainers.addAll(containerInfo.getUpdateContainers());
     }
+    
+    LOG.info("***completedContainers: " + completedContainers);
+    LOG.info("***newlyLaunchedContainers: " + newlyLaunchedContainers);
 
     // Processing the newly launched containers
     for (ContainerStatus launchedContainer : newlyLaunchedContainers) {

@@ -44,6 +44,7 @@ public class TestSLSWebApp {
     simulateInfoMap.put("Node VCores", 1);
     simulateInfoMap.put("Number of applications", 100);
     simulateInfoMap.put("Number of tasks", 1000);
+    //TODO typo
     simulateInfoMap.put("Average tasks per applicaion", 10);
     simulateInfoMap.put("Number of queues", 4);
     simulateInfoMap.put("Average applications per queue", 25);

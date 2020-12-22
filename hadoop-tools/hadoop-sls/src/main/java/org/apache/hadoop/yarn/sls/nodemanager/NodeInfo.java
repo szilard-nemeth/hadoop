@@ -45,6 +45,8 @@ import org.apache.hadoop.yarn.server.resourcemanager.nodelabels.RMNodeLabelsMana
 import org.apache.hadoop.yarn.server.resourcemanager.rmnode.RMNode;
 import org.apache.hadoop.yarn.server.resourcemanager.rmnode
         .UpdatedContainerInfo;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Private
 @Unstable
@@ -54,6 +56,7 @@ public class NodeInfo {
   public static NodeId newNodeID(String host, int port) {
     return NodeId.newInstance(host, port);
   }
+  private static final Logger LOG = LoggerFactory.getLogger(NodeInfo.class);
 
   @Private
   @Unstable
@@ -160,6 +163,7 @@ public class NodeInfo {
     }
 
     public List<UpdatedContainerInfo> pullContainerUpdates() {
+      LOG.info("***FakeRMNodeImpl#pullContainerUpdates");
       ArrayList<UpdatedContainerInfo> list = new ArrayList<UpdatedContainerInfo>();
       
       ArrayList<ContainerStatus> list2 = new ArrayList<ContainerStatus>();
@@ -171,6 +175,7 @@ public class NodeInfo {
           new ArrayList<Map.Entry<ApplicationId, ContainerStatus>>();
       list.add(new UpdatedContainerInfo(new ArrayList<ContainerStatus>(),
           list2, needUpdateContainers));
+      LOG.info("***FakeRMNodeImpl#pullContainerUpdates, last list item: " + list.get(list.size() - 1));
       return list;
     }
 
@@ -252,6 +257,24 @@ public class NodeInfo {
         long defaultInterval, long minInterval, long maxInterval,
         float speedupFactor, float slowdownFactor) {
       return defaultInterval;
+    }
+
+    @Override
+    public String toString() {
+      return "FakeRMNodeImpl{" +
+          "nodeId=" + nodeId +
+          ", hostName='" + hostName + '\'' +
+          ", nodeAddr='" + nodeAddr + '\'' +
+          ", httpAddress='" + httpAddress + '\'' +
+          ", cmdPort=" + cmdPort +
+          ", perNode=" + perNode +
+          ", rackName='" + rackName + '\'' +
+          ", healthReport='" + healthReport + '\'' +
+          ", state=" + state +
+          ", toCleanUpContainers=" + toCleanUpContainers +
+          ", toCleanUpApplications=" + toCleanUpApplications +
+          ", runningApplications=" + runningApplications +
+          '}';
     }
   }
 

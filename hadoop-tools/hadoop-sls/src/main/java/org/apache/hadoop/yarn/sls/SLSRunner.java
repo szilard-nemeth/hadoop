@@ -918,6 +918,7 @@ public class SLSRunner extends Configured implements Tool {
         nodeManagerResource.getResourceValue(ResourceInformation.VCORES_URI));
     simulateInfoMap.put("Number of applications", numAMs);
     simulateInfoMap.put("Number of tasks", numTasks);
+    //TODO typo
     simulateInfoMap.put("Average tasks per applicaion",
             (int)(Math.ceil((numTasks + 0.0) / numAMs)));
     simulateInfoMap.put("Number of queues", queueAppNumMap.size());

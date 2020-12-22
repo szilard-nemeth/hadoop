@@ -52,4 +52,12 @@ public class UpdatedContainerInfo {
   public List<Map.Entry<ApplicationId, ContainerStatus>> getUpdateContainers() {
     return this.updateContainers;
   }
+
+  @Override
+  public String toString() {
+    return "UpdatedContainerInfo{" +
+        "newlyLaunchedContainers=" + newlyLaunchedContainers +
+        ", completedContainers=" + completedContainers +
+        '}';
+  }
 }

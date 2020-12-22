@@ -221,7 +221,8 @@ public abstract class AMSimulator extends TaskRunner.Task {
 
   @Override
   public void lastStep() throws Exception {
-    LOG.info("Application {} is shutting down.", appId);
+    LOG.info(String.format("Application %s is shutting down. lastStep " +
+        "Stacktrace", appId), new Exception());
     // unregister tracking
     if (isTracked) {
       untrackApp();

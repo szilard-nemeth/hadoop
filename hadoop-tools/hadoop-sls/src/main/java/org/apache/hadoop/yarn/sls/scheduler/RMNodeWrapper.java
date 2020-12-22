@@ -36,6 +36,8 @@ import org.apache.hadoop.yarn.server.resourcemanager.nodelabels.RMNodeLabelsMana
 import org.apache.hadoop.yarn.server.resourcemanager.rmnode.RMNode;
 import org.apache.hadoop.yarn.server.resourcemanager.rmnode
         .UpdatedContainerInfo;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Collections;
 import java.util.List;
@@ -48,10 +50,13 @@ public class RMNodeWrapper implements RMNode {
   private RMNode node;
   private List<UpdatedContainerInfo> updates;
   private boolean pulled = false;
+  private static final Logger LOG = LoggerFactory.getLogger(RMNodeWrapper.class);
   
   public RMNodeWrapper(RMNode node) {
     this.node = node;
     updates = node.pullContainerUpdates();
+    LOG.info("***RMNodeWrapper constructor. updates: " + updates);
+    LOG.info("RMNode instance: " + node.getClass());
   }
   
   @Override
@@ -147,11 +152,16 @@ public class RMNodeWrapper implements RMNode {
 
   @Override
   public List<UpdatedContainerInfo> pullContainerUpdates() {
+    LOG.info("****RMNodeWrapper:: Pulling container updates");
     List<UpdatedContainerInfo> list = Collections.emptyList();
     if (! pulled) {
+      LOG.info("***RMNodeWrapper#pullContainerUpdates, pulled=false");
       list = updates;
       pulled = true;
+    } else {
+      LOG.info("***RMNodeWrapper#pullContainerUpdates, pulled=true");
     }
+    LOG.info("***Resulted updates: " + list);
     return list;    
   }
   
@@ -237,5 +247,14 @@ public class RMNodeWrapper implements RMNode {
       long defaultInterval, long minInterval, long maxInterval,
       float speedupFactor, float slowdownFactor) {
     return defaultInterval;
+  }
+
+  @Override
+  public String toString() {
+    return "RMNodeWrapper{" +
+        "node=" + node +
+        ", updates=" + updates +
+        ", pulled=" + pulled +
+        '}';
   }
 }

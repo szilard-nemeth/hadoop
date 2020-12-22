@@ -16,7 +16,9 @@
  * limitations under the License.
  */
 package org.apache.hadoop.yarn.sls.scheduler;
-
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.apache.hadoop.yarn.sls.appmaster.AMSimulator;
 import java.text.MessageFormat;
 import java.util.Queue;
 import java.util.concurrent.DelayQueue;
@@ -33,6 +35,7 @@ public class TaskRunner {
   @Private
   @Unstable
   public abstract static class Task implements Runnable, Delayed {
+    private static final Logger LOG = LoggerFactory.getLogger(Task.class);
     private long start;
     private long end;
     private long nextRun;
@@ -45,6 +48,7 @@ public class TaskRunner {
     
     //values in milliseconds, start/end are milliseconds from now
     public void init(long startTime, long endTime, long repeatInterval) {
+      logAmSimulatorInit();
       if (endTime - startTime < 0) {
         throw new IllegalArgumentException(MessageFormat.format(
           "endTime[{0}] cannot be smaller than startTime[{1}]", endTime, 
@@ -66,6 +70,7 @@ public class TaskRunner {
     }
 
     private void timeRebase(long now) {
+      logAmSimulatorTimeRebase(now, startTime, now + start, endTime, now + end, this.nextRun, now + start);
       startTime = now + start;
       endTime = now + end;
       this.nextRun = startTime;
@@ -85,16 +90,19 @@ public class TaskRunner {
     public final void run() {
       try {
         if (nextRun == startTime) {
+          logAmSimulatorStep("firstStep");
           firstStep();
           nextRun += repeatInterval;
           if (nextRun <= endTime) {
             queue.add(this);          
           }
         } else if (nextRun < endTime) {
+          logAmSimulatorStep("middleStep");
           middleStep();
           nextRun += repeatInterval;
           queue.add(this);
         } else {
+          logAmSimulatorStep("lastStep");
           lastStep();
         }
       } catch (Exception e) {
@@ -102,6 +110,41 @@ public class TaskRunner {
         Thread.getDefaultUncaughtExceptionHandler()
             .uncaughtException(Thread.currentThread(), e);
       }
+    }
+
+    private void logAmSimulatorStep(String step) {
+      if (this instanceof AMSimulator) {
+        AMSimulator amsim = ((AMSimulator) this);
+        LOG.debug("Executing step: {} for application: {}, AMSimulator details: {}", step, amsim.getApplicationId(), getAmSimulatorDetails());
+      }
+    }
+
+    private void logAmSimulatorInit() {
+      if (this instanceof AMSimulator) {
+        AMSimulator amsim = ((AMSimulator) this);
+        LOG.debug("Executing init for application: {}, AMSimulator details: {}", amsim.getApplicationId(), getAmSimulatorDetails());
+      }
+    }
+
+    private void logAmSimulatorTimeRebase(long now, long startTimeCurr, long startTimeNext,
+        long endTimeCurr, long endTimeNext, long nextRunCurr, long nextRunNext) {
+      if (this instanceof AMSimulator) {
+        AMSimulator amsim = ((AMSimulator) this);
+        LOG.debug("Executing TimeRebase for application: {}, now: {}, startTimeCurr: {}, startTimeNext: {}, " +
+            "endTimeCurr: {}, endTimeNext: {}, nextRunCurr: {}, nextRunNext: {}", 
+            amsim.getApplicationId(), now, startTimeCurr, startTimeNext, endTimeCurr, endTimeNext, nextRunCurr, nextRunNext);
+      }
+    }
+
+
+    private String getAmSimulatorDetails() {
+      if (this instanceof AMSimulator) {
+        AMSimulator amsim = ((AMSimulator) this);
+        return String.format("AMSIM details for application: %s, --> start: %d, end: %d, nextrun: %d, starttime: %d, endTime:" +
+                " %d, repeatInterval: %d",
+            amsim.getApplicationId(), start, end, nextRun, startTime, endTime, repeatInterval);
+      }
+      return "";
     }
 
     @Override
