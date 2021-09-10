@@ -18,7 +18,7 @@
 
 package org.apache.hadoop.yarn.server.resourcemanager;
 
-import com.google.common.base.Supplier;
+import java.util.function.Supplier;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.CommonConfigurationKeysPublic;
 import org.apache.hadoop.metrics2.lib.DefaultMetricsSystem;
@@ -84,9 +84,7 @@ import org.apache.hadoop.yarn.util.Records;
 import org.apache.hadoop.yarn.util.resource.DominantResourceCalculator;
 import org.apache.hadoop.yarn.util.resource.ResourceCalculator;
 import org.apache.hadoop.yarn.util.resource.Resources;
-import org.apache.log4j.Level;
-import org.apache.log4j.LogManager;
-import org.apache.log4j.Logger;
+import org.slf4j.event.Level;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
@@ -102,6 +100,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.apache.hadoop.yarn.server.resourcemanager.scheduler.capacity.CapacitySchedulerConfiguration.PREFIX;
 
 import static org.apache.hadoop.yarn.server.resourcemanager.scheduler
@@ -127,8 +127,7 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
 
   @Before
   public void setup() throws UnknownHostException {
-    Logger rootLogger = LogManager.getRootLogger();
-    rootLogger.setLevel(Level.DEBUG);
+    GenericTestUtils.setRootLogLevel(Level.DEBUG);
     conf = getConf();
     UserGroupInformation.setConfiguration(conf);
     conf.set(YarnConfiguration.RECOVERY_ENABLED, "true");
@@ -171,7 +170,7 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
     MockNM nm1 =
         new MockNM("127.0.0.1:1234", 8192, rm1.getResourceTrackerService());
     nm1.registerNode();
-    RMApp app1 = rm1.submitApp(200);
+    RMApp app1 = MockRMAppSubmitter.submitWithMemory(200, rm1);
     Resource amResources = app1.getAMResourceRequests().get(0).getCapability();
     MockAM am1 = MockRM.launchAndRegisterAM(app1, rm1, nm1);
 
@@ -266,7 +265,8 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
       scheduler.getRMContainer(amContainer.getContainerId())));
     assertTrue(schedulerAttempt.getLiveContainers().contains(
       scheduler.getRMContainer(runningContainer.getContainerId())));
-    assertEquals(schedulerAttempt.getCurrentConsumption(), usedResources);
+    assertThat(schedulerAttempt.getCurrentConsumption()).
+        isEqualTo(usedResources);
 
     // *********** check appSchedulingInfo state ***********
     assertEquals((1L << 40) + 1L, schedulerAttempt.getNewContainerId());
@@ -335,9 +335,15 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
     // dynamic queue.
     rm1.getRMContext().getReservationSystem()
         .synchronizePlan(ReservationSystemTestUtil.reservationQ, true);
-    RMApp app1 = rm1.submitApp(200, "dynamicQApp",
-        UserGroupInformation.getCurrentUser().getShortUserName(), null,
-        ReservationSystemTestUtil.getReservationQueueName());
+    MockRMAppSubmissionData data =
+        MockRMAppSubmissionData.Builder.createWithMemory(200, rm1)
+            .withAppName("dynamicQApp")
+            .withUser(UserGroupInformation.getCurrentUser().getShortUserName())
+            .withAcls(null)
+            .withQueue(ReservationSystemTestUtil.getReservationQueueName())
+            .withUnmanagedAM(false)
+            .build();
+    RMApp app1 = MockRMAppSubmitter.submit(rm1, data);
     Resource amResources = app1.getAMResourceRequests().get(0).getCapability();
     MockAM am1 = MockRM.launchAndRegisterAM(app1, rm1, nm1);
 
@@ -424,7 +430,8 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
         .contains(scheduler.getRMContainer(amContainer.getContainerId())));
     assertTrue(schedulerAttempt.getLiveContainers()
         .contains(scheduler.getRMContainer(runningContainer.getContainerId())));
-    assertEquals(schedulerAttempt.getCurrentConsumption(), usedResources);
+    assertThat(schedulerAttempt.getCurrentConsumption()).
+        isEqualTo(usedResources);
 
     // *********** check appSchedulingInfo state ***********
     assertEquals((1L << 40) + 1L, schedulerAttempt.getNewContainerId());
@@ -617,7 +624,13 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
     MockNM nm1 =
         new MockNM("127.0.0.1:1234", 8192, rm1.getResourceTrackerService());
     nm1.registerNode();
-    final RMApp app1 = rm1.submitApp(1024, "app1", USER_1, null);
+    MockRMAppSubmissionData data =
+        MockRMAppSubmissionData.Builder.createWithMemory(1024, rm1)
+            .withAppName("app1")
+            .withUser(USER_1)
+            .withAcls(null)
+            .build();
+    final RMApp app1 = MockRMAppSubmitter.submit(rm1, data);
     MockAM am1 = MockRM.launchAndRegisterAM(app1,rm1, nm1);
     MockRM.finishAMAndVerifyAppState(app1, rm1, nm1, am1);
 
@@ -670,12 +683,36 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
         new MockNM("127.1.1.1:4321", 8192, rm1.getResourceTrackerService());
     nm1.registerNode();
     nm2.registerNode();
-    RMApp app1_1 = rm1.submitApp(1024, "app1_1", USER_1, null, A);
+    MockRMAppSubmissionData data2 =
+        MockRMAppSubmissionData.Builder.createWithMemory(1024, rm1)
+            .withAppName("app1_1")
+            .withUser(USER_1)
+            .withAcls(null)
+            .withQueue(A)
+            .withUnmanagedAM(false)
+            .build();
+    RMApp app1_1 = MockRMAppSubmitter.submit(rm1, data2);
     MockAM am1_1 = MockRM.launchAndRegisterAM(app1_1, rm1, nm1);
-    RMApp app1_2 = rm1.submitApp(1024, "app1_2", USER_1, null, A);
+    MockRMAppSubmissionData data1 =
+        MockRMAppSubmissionData.Builder.createWithMemory(1024, rm1)
+            .withAppName("app1_2")
+            .withUser(USER_1)
+            .withAcls(null)
+            .withQueue(A)
+            .withUnmanagedAM(false)
+            .build();
+    RMApp app1_2 = MockRMAppSubmitter.submit(rm1, data1);
     MockAM am1_2 = MockRM.launchAndRegisterAM(app1_2, rm1, nm2);
 
-    RMApp app2 = rm1.submitApp(1024, "app2", USER_2, null, B);
+    MockRMAppSubmissionData data =
+        MockRMAppSubmissionData.Builder.createWithMemory(1024, rm1)
+            .withAppName("app2")
+            .withUser(USER_2)
+            .withAcls(null)
+            .withQueue(B)
+            .withUnmanagedAM(false)
+            .build();
+    RMApp app2 = MockRMAppSubmitter.submit(rm1, data);
     MockAM am2 = MockRM.launchAndRegisterAM(app2, rm1, nm2);
 
     // clear queue metrics
@@ -778,8 +815,9 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
     ApplicationReport report = rm2.getApplicationReport(app.getApplicationId());
     assertEquals(report.getFinalApplicationStatus(),
         FinalApplicationStatus.KILLED);
-    assertEquals(report.getYarnApplicationState(), YarnApplicationState.KILLED);
-    assertEquals(report.getDiagnostics(), diagnostics);
+    assertThat(report.getYarnApplicationState()).
+        isEqualTo(YarnApplicationState.KILLED);
+    assertThat(report.getDiagnostics()).isEqualTo(diagnostics);
 
     //Reload previous state with cloned app sub context object
     RMState newState = memStore2.reloadStateWithClonedAppSubCtxt(state);
@@ -840,7 +878,15 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
     nm.registerNode();
 
     // Submit an app to QueueB.
-    RMApp app = rm1.submitApp(1024, "app", USER_2, null, B);
+    MockRMAppSubmissionData data =
+        MockRMAppSubmissionData.Builder.createWithMemory(1024, rm1)
+            .withAppName("app")
+            .withUser(USER_2)
+            .withAcls(null)
+            .withQueue(B)
+            .withUnmanagedAM(false)
+            .build();
+    RMApp app = MockRMAppSubmitter.submit(rm1, data);
     MockRM.launchAndRegisterAM(app, rm1, nm);
     assertEquals(rm1.getApplicationReport(app.getApplicationId()).
         getYarnApplicationState(), YarnApplicationState.RUNNING);
@@ -888,20 +934,50 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
         new MockNM("127.1.1.1:4321", 8192, rm1.getResourceTrackerService());
     nm1.registerNode();
     nm2.registerNode();
-    RMApp app1_1 = rm1.submitApp(1024, "app1_1", USER_1, null, A);
+    MockRMAppSubmissionData data2 =
+        MockRMAppSubmissionData.Builder.createWithMemory(1024, rm1)
+            .withAppName("app1_1")
+            .withUser(USER_1)
+            .withAcls(null)
+            .withQueue(A)
+            .withUnmanagedAM(false)
+            .build();
+    RMApp app1_1 = MockRMAppSubmitter.submit(rm1, data2);
     MockAM am1_1 = MockRM.launchAndRegisterAM(app1_1, rm1, nm1);
-    RMApp app1_2 = rm1.submitApp(1024, "app1_2", USER_1, null, A);
+    MockRMAppSubmissionData data1 =
+        MockRMAppSubmissionData.Builder.createWithMemory(1024, rm1)
+            .withAppName("app1_2")
+            .withUser(USER_1)
+            .withAcls(null)
+            .withQueue(A)
+            .withUnmanagedAM(false)
+            .build();
+    RMApp app1_2 = MockRMAppSubmitter.submit(rm1, data1);
     MockAM am1_2 = MockRM.launchAndRegisterAM(app1_2, rm1, nm2);
 
-    RMApp app2 = rm1.submitApp(1024, "app2", USER_2, null, B);
+    MockRMAppSubmissionData data =
+        MockRMAppSubmissionData.Builder.createWithMemory(1024, rm1)
+            .withAppName("app2")
+            .withUser(USER_2)
+            .withAcls(null)
+            .withQueue(B)
+            .withUnmanagedAM(false)
+            .build();
+    RMApp app2 = MockRMAppSubmitter.submit(rm1, data);
     MockAM am2 = MockRM.launchAndRegisterAM(app2, rm1, nm2);
     assertEquals(rm1.getApplicationReport(app2.getApplicationId()).
         getYarnApplicationState(), YarnApplicationState.RUNNING);
 
     //Submit an app with a non existant queue to make sure it does not
     //cause a fatal failure in the non-recovery case
-    RMApp appNA = rm1.submitApp(1024, "app1_2", USER_1, null,
-       QUEUE_DOESNT_EXIST, false);
+    RMApp appNA = MockRMAppSubmitter.submit(rm1,
+        MockRMAppSubmissionData.Builder.createWithMemory(1024, rm1)
+            .withAppName("app1_2")
+            .withUser(USER_1)
+            .withAcls(null)
+            .withQueue(QUEUE_DOESNT_EXIST)
+            .withWaitForAppAcceptedState(false)
+            .build());
 
     // clear queue metrics
     rm1.clearQueueMetrics(app1_1);
@@ -939,7 +1015,7 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
     MockNM nm1 =
         new MockNM("127.0.0.1:1234", 8192, rm1.getResourceTrackerService());
     nm1.registerNode();
-    RMApp app1 = rm1.submitApp(200);
+    RMApp app1 = MockRMAppSubmitter.submitWithMemory(200, rm1);
     MockAM am1 = MockRM.launchAndRegisterAM(app1, rm1, nm1);
 
     rm2 = new MockRM(conf, rm1.getRMStateStore());
@@ -992,7 +1068,7 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
     MockNM nm1 =
         new MockNM("127.0.0.1:1234", 8192, rm1.getResourceTrackerService());
     nm1.registerNode();
-    RMApp app1 = rm1.submitApp(200);
+    RMApp app1 = MockRMAppSubmitter.submitWithMemory(200, rm1);
     MockAM am1 = MockRM.launchAndRegisterAM(app1, rm1, nm1);
     MockRM.finishAMAndVerifyAppState(app1, rm1, nm1, am1);
 
@@ -1032,7 +1108,7 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
     nm1.registerNode();
 
     // create app and launch the AM
-    RMApp app0 = rm1.submitApp(200);
+    RMApp app0 = MockRMAppSubmitter.submitWithMemory(200, rm1);
     MockAM am0 = MockRM.launchAM(app0, rm1, nm1);
     // Issuing registerAppAttempt() before and after RM restart to confirm
     // registerApplicationMaster() is idempotent.
@@ -1059,7 +1135,7 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
     MockNM nm1 =
         new MockNM("127.0.0.1:1234", 8192, rm1.getResourceTrackerService());
     nm1.registerNode();
-    RMApp app1_1 = rm1.submitApp(1024);
+    RMApp app1_1 = MockRMAppSubmitter.submitWithMemory(1024, rm1);
     MockAM am1_1 = MockRM.launchAndRegisterAM(app1_1, rm1, nm1);
     
     RMAppAttempt attempt0 = app1_1.getCurrentAppAttempt();
@@ -1095,7 +1171,7 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
     nm1.registerNode();
 
     // create app and launch the AM
-    RMApp app0 = rm1.submitApp(200);
+    RMApp app0 = MockRMAppSubmitter.submitWithMemory(200, rm1);
     MockAM am0 = MockRM.launchAndRegisterAM(app0, rm1, nm1);
 
     rm2 = new MockRM(conf, rm1.getRMStateStore());
@@ -1124,7 +1200,7 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
     nm1.registerNode();
     rm1.start();
 
-    RMApp app1 = rm1.submitApp(1024);
+    RMApp app1 = MockRMAppSubmitter.submitWithMemory(1024, rm1);
     final MockAM am1 = MockRM.launchAndRegisterAM(app1, rm1, nm1);
 
     // Re-start RM
@@ -1220,7 +1296,7 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
     MockNM nm1 =
         new MockNM("127.0.0.1:1234", 8192, rm1.getResourceTrackerService());
     nm1.registerNode();
-    RMApp app1 = rm1.submitApp(200);
+    RMApp app1 = MockRMAppSubmitter.submitWithMemory(200, rm1);
     MockAM am1 = MockRM.launchAndRegisterAM(app1, rm1, nm1);
 
     // Restart RM
@@ -1278,7 +1354,7 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
     nm1.registerNode();
 
     // create app and launch the AM
-    RMApp app0 = rm1.submitApp(200);
+    RMApp app0 = MockRMAppSubmitter.submitWithMemory(200, rm1);
     MockAM am0 = MockRM.launchAM(app0, rm1, nm1);
 
     am0.registerAppAttempt();
@@ -1309,7 +1385,7 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
     MockNM nm1 =
         new MockNM("127.0.0.1:1234", 8192, rm1.getResourceTrackerService());
     nm1.registerNode();
-    RMApp app1 = rm1.submitApp(200);
+    RMApp app1 = MockRMAppSubmitter.submitWithMemory(200, rm1);
     MockAM am1 = MockRM.launchAndRegisterAM(app1, rm1, nm1);
 
     MockRM rm2 = new TestSecurityMockRM(conf, rm1.getRMStateStore()) {
@@ -1354,7 +1430,7 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
     MockNM nm1 =
         new MockNM("127.0.0.1:1234", 8192, rm1.getResourceTrackerService());
     nm1.registerNode();
-    RMApp app1 = rm1.submitApp(200);
+    RMApp app1 = MockRMAppSubmitter.submitWithMemory(200, rm1);
     MockAM am1 = MockRM.launchAndRegisterAM(app1, rm1, nm1);
 
     // Change the config so that validateAndCreateResourceRequest throws
@@ -1379,10 +1455,12 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
     // submit app with keepContainersAcrossApplicationAttempts true
     Resource resource = Records.newRecord(Resource.class);
     resource.setMemorySize(200);
-    RMApp app0 = rm1.submitApp(resource, "", UserGroupInformation
-        .getCurrentUser().getShortUserName(), null, false, null,
-        YarnConfiguration.DEFAULT_RM_AM_MAX_ATTEMPTS, null, null, true, true,
-        false, null, 0, null, true, null);
+    MockRMAppSubmissionData data = MockRMAppSubmissionData.Builder
+        .createWithResource(resource, rm1)
+        .withKeepContainers(true)
+        .withMaxAppAttempts(YarnConfiguration.DEFAULT_RM_AM_MAX_ATTEMPTS)
+        .build();
+    RMApp app0 = MockRMAppSubmitter.submit(rm1, data);
     MockAM am0 = MockRM.launchAndRegisterAM(app0, rm1, nm1);
 
     am0.allocate("127.0.0.1", 1000, 2, new ArrayList<ContainerId>());
@@ -1446,7 +1524,7 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
     MockNM nm1 = new MockNM("127.0.0.1:1234", 15120, rm1.getResourceTrackerService());
     nm1.registerNode();
 
-    RMApp app1 = rm1.submitApp(200);
+    RMApp app1 = MockRMAppSubmitter.submitWithMemory(200, rm1);
     MockAM am1 = MockRM.launchAndRegisterAM(app1, rm1, nm1);
     MockRM.finishAMAndVerifyAppState(app1, rm1, nm1, am1);
 
@@ -1481,10 +1559,17 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
         new MockNM("127.0.0.1:1234", 15120, rm1.getResourceTrackerService());
     nm1.registerNode();
 
+    QueueMetrics qm1 = rm1.getResourceScheduler().getRootQueueMetrics();
+    assertUnmanagedAMQueueMetrics(qm1, 0, 0, 0, 0);
     // create app and launch the UAM
-    RMApp app0 = rm1.submitApp(200, true);
+    MockRMAppSubmissionData data =
+        MockRMAppSubmissionData.Builder.createWithMemory(200, rm1)
+            .withUnmanagedAM(true)
+            .build();
+    RMApp app0 = MockRMAppSubmitter.submit(rm1, data);
     MockAM am0 = MockRM.launchUAM(app0, rm1, nm1);
     am0.registerAppAttempt();
+    assertUnmanagedAMQueueMetrics(qm1, 1, 1, 0, 0);
 
     // Allocate containers to UAM
     int numContainers = 2;
@@ -1499,17 +1584,19 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
           new ArrayList<ContainerId>()).getAllocatedContainers());
       Thread.sleep(100);
     }
+    assertUnmanagedAMQueueMetrics(qm1, 1, 0, 1, 0);
 
     // start new RM
     rm2 = new MockRM(conf, memStore);
     rm2.start();
     MockMemoryRMStateStore memStore2 =
         (MockMemoryRMStateStore) rm2.getRMStateStore();
+    QueueMetrics qm2 = rm2.getResourceScheduler().getRootQueueMetrics();
     rm2.waitForState(app0.getApplicationId(), RMAppState.ACCEPTED);
     rm2.waitForState(am0.getApplicationAttemptId(), RMAppAttemptState.LAUNCHED);
-
     // recover app
     nm1.setResourceTrackerService(rm2.getResourceTrackerService());
+    assertUnmanagedAMQueueMetrics(qm2, 1, 1, 0, 0);
     RMApp recoveredApp =
         rm2.getRMContext().getRMApps().get(app0.getApplicationId());
     NMContainerStatus container1 = TestRMRestart
@@ -1519,13 +1606,13 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
         .createNMContainerStatus(am0.getApplicationAttemptId(), 2,
             ContainerState.RUNNING);
     nm1.registerNode(Arrays.asList(container1, container2), null);
-
     // Wait for RM to settle down on recovering containers;
     waitForNumContainersToRecover(2, rm2, am0.getApplicationAttemptId());
 
     // retry registerApplicationMaster() after RM restart.
     am0.setAMRMProtocol(rm2.getApplicationMasterService(), rm2.getRMContext());
     am0.registerAppAttempt(true);
+    assertUnmanagedAMQueueMetrics(qm2, 1, 0, 1, 0);
 
     // Check if UAM is correctly recovered on restart
     rm2.waitForState(app0.getApplicationId(), RMAppState.RUNNING);
@@ -1544,6 +1631,7 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
 
     // Check if UAM is able to heart beat
     Assert.assertNotNull(am0.doHeartbeat());
+    assertUnmanagedAMQueueMetrics(qm2, 1, 0, 1, 0);
 
     // Complete the UAM
     am0.unregisterAppAttempt(false);
@@ -1551,14 +1639,25 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
     rm2.waitForState(app0.getApplicationId(), RMAppState.FINISHED);
     Assert.assertEquals(FinalApplicationStatus.SUCCEEDED,
         recoveredApp.getFinalApplicationStatus());
+    assertUnmanagedAMQueueMetrics(qm2, 1, 0, 0, 1);
 
     // Restart RM once more to check UAM is not re-run
     MockRM rm3 = new MockRM(conf, memStore2);
     rm3.start();
     recoveredApp = rm3.getRMContext().getRMApps().get(app0.getApplicationId());
+    QueueMetrics qm3 = rm3.getResourceScheduler().getRootQueueMetrics();
     Assert.assertEquals(RMAppState.FINISHED, recoveredApp.getState());
-
+    assertUnmanagedAMQueueMetrics(qm2, 1, 0, 0, 1);
   }
+
+  private void assertUnmanagedAMQueueMetrics(QueueMetrics qm, int appsSubmitted,
+      int appsPending, int appsRunning, int appsCompleted) {
+    Assert.assertEquals(appsSubmitted, qm.getUnmanagedAppsSubmitted());
+    Assert.assertEquals(appsPending, qm.getUnmanagedAppsPending());
+    Assert.assertEquals(appsRunning, qm.getUnmanagedAppsRunning());
+    Assert.assertEquals(appsCompleted, qm.getUnmanagedAppsCompleted());
+  }
+
 
   @Test(timeout = 30000)
   public void testUnknownUserOnRecovery() throws Exception {
@@ -1572,7 +1671,11 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
     nm1.registerNode();
 
     // create app and launch the UAM
-    RMApp app0 = rm1.submitApp(200, true);
+    MockRMAppSubmissionData data =
+        MockRMAppSubmissionData.Builder.createWithMemory(200, rm1)
+            .withUnmanagedAM(true)
+            .build();
+    RMApp app0 = MockRMAppSubmitter.submit(rm1, data);
     MockAM am0 = MockRM.launchUAM(app0, rm1, nm1);
     am0.registerAppAttempt();
     rm1.killApp(app0.getApplicationId());
@@ -1648,7 +1751,15 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
         rm1.getResourceTrackerService());
     nm1.registerNode();
     // 2. submit app to queue which is auto-created.
-    RMApp app1 = rm1.submitApp(200, "autoCreatedQApp", user, null, queueName);
+    MockRMAppSubmissionData data =
+        MockRMAppSubmissionData.Builder.createWithMemory(200, rm1)
+            .withAppName("autoCreatedQApp")
+            .withUser(user)
+            .withAcls(null)
+            .withQueue(queueName)
+            .withUnmanagedAM(false)
+            .build();
+    RMApp app1 = MockRMAppSubmitter.submit(rm1, data);
     Resource amResources = app1.getAMResourceRequests().get(0).getCapability();
     MockAM am1 = MockRM.launchAndRegisterAM(app1, rm1, nm1);
 
@@ -1733,7 +1844,8 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
         .contains(scheduler.getRMContainer(amContainer.getContainerId())));
     assertTrue(schedulerAttempt.getLiveContainers()
         .contains(scheduler.getRMContainer(runningContainer.getContainerId())));
-    assertEquals(schedulerAttempt.getCurrentConsumption(), usedResources);
+    assertThat(schedulerAttempt.getCurrentConsumption()).
+        isEqualTo(usedResources);
 
     // *********** check appSchedulingInfo state ***********
     assertEquals((1L << 40) + 1L, schedulerAttempt.getNewContainerId());
@@ -1752,7 +1864,7 @@ public class TestWorkPreservingRMRestart extends ParameterizedSchedulerTestBase 
     MockNM nm1 =
         new MockNM("127.0.0.1:1234", 8192, rm1.getResourceTrackerService());
     nm1.registerNode();
-    RMApp app = rm1.submitApp(200);
+    RMApp app = MockRMAppSubmitter.submitWithMemory(200, rm1);
     MockAM am1 = MockRM.launchAndRegisterAM(app, rm1, nm1);
     MockRM.finishAMAndVerifyAppState(app, rm1, nm1, am1);
 

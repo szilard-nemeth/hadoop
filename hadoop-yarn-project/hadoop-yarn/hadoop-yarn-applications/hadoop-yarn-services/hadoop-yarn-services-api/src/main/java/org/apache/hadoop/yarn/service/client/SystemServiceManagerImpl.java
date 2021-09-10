@@ -16,7 +16,7 @@
  */
 package org.apache.hadoop.yarn.service.client;
 
-import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
@@ -361,9 +361,7 @@ public class SystemServiceManagerImpl extends AbstractService
   private Service getServiceDefinition(Path filePath) {
     Service service = null;
     try {
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("Loading service definition from FS: " + filePath);
-      }
+      LOG.debug("Loading service definition from FS: {}", filePath);
       service = jsonSerDeser.load(fs, filePath);
     } catch (IOException e) {
       LOG.info("Error while loading service definition from FS: {}", e);

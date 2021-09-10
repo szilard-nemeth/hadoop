@@ -18,10 +18,12 @@
 package org.apache.hadoop.hdfs.server.datanode.fsdataset.impl;
 
 import java.io.IOException;
+import java.net.URI;
 import java.nio.channels.ClosedChannelException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.Iterator;
 import java.util.List;
@@ -34,6 +36,7 @@ import java.util.concurrent.locks.Condition;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.StorageType;
+import org.apache.hadoop.hdfs.DFSConfigKeys;
 import org.apache.hadoop.hdfs.protocol.BlockListAsLongs;
 import org.apache.hadoop.hdfs.server.datanode.fsdataset.FsVolumeReference;
 import org.apache.hadoop.hdfs.server.datanode.fsdataset.FsVolumeSpi;
@@ -61,9 +64,14 @@ class FsVolumeList {
   private final VolumeChoosingPolicy<FsVolumeImpl> blockChooser;
   private final BlockScanner blockScanner;
 
+  private final boolean enableSameDiskTiering;
+  private final MountVolumeMap mountVolumeMap;
+  private Map<URI, Double> capacityRatioMap;
+
   FsVolumeList(List<VolumeFailureInfo> initialVolumeFailureInfos,
       BlockScanner blockScanner,
-      VolumeChoosingPolicy<FsVolumeImpl> blockChooser) {
+      VolumeChoosingPolicy<FsVolumeImpl> blockChooser,
+      Configuration config) {
     this.blockChooser = blockChooser;
     this.blockScanner = blockScanner;
     this.checkDirsLock = new AutoCloseableLock();
@@ -72,6 +80,15 @@ class FsVolumeList {
       volumeFailureInfos.put(volumeFailureInfo.getFailedStorageLocation(),
           volumeFailureInfo);
     }
+    enableSameDiskTiering = config.getBoolean(
+        DFSConfigKeys.DFS_DATANODE_ALLOW_SAME_DISK_TIERING,
+        DFSConfigKeys.DFS_DATANODE_ALLOW_SAME_DISK_TIERING_DEFAULT);
+    mountVolumeMap = new MountVolumeMap(config);
+    initializeCapacityRatio(config);
+  }
+
+  MountVolumeMap getMountVolumeMap() {
+    return mountVolumeMap;
   }
 
   /**
@@ -94,6 +111,44 @@ class FsVolumeList {
         // is empty, indicating that all volumes are closed.
         list.remove(volume);
       }
+    }
+  }
+
+  /**
+   * Get volume by disk mount to place a block.
+   * This is useful for same disk tiering.
+   *
+   * @param storageType The desired {@link StorageType}
+   * @param mount Disk mount of the volume
+   * @param blockSize Free space needed on the volume
+   * @return
+   * @throws IOException
+   */
+  FsVolumeReference getVolumeByMount(StorageType storageType,
+      String mount, long blockSize) throws IOException {
+    if (!enableSameDiskTiering) {
+      return null;
+    }
+    FsVolumeReference volume = mountVolumeMap
+        .getVolumeRefByMountAndStorageType(mount, storageType);
+    // Check if volume has enough capacity
+    if (volume != null && volume.getVolume().getAvailable() > blockSize) {
+      return volume;
+    }
+    return null;
+  }
+
+  private void initializeCapacityRatio(Configuration config) {
+    if (capacityRatioMap == null) {
+      String capacityRatioConfig = config.get(
+          DFSConfigKeys
+              .DFS_DATANODE_SAME_DISK_TIERING_CAPACITY_RATIO_PERCENTAGE,
+          DFSConfigKeys
+              .DFS_DATANODE_SAME_DISK_TIERING_CAPACITY_RATIO_PERCENTAGE_DEFAULT
+      );
+
+      this.capacityRatioMap = StorageLocation
+          .parseCapacityRatio(capacityRatioConfig);
     }
   }
 
@@ -188,8 +243,8 @@ class FsVolumeList {
                         final RamDiskReplicaTracker ramDiskReplicaMap)
       throws IOException {
     long totalStartTime = Time.monotonicNow();
-    final List<IOException> exceptions = Collections.synchronizedList(
-        new ArrayList<IOException>());
+    final Map<FsVolumeSpi, IOException> unhealthyDataDirs =
+        new ConcurrentHashMap<FsVolumeSpi, IOException>();
     List<Thread> replicaAddingThreads = new ArrayList<Thread>();
     for (final FsVolumeImpl v : volumes) {
       Thread t = new Thread() {
@@ -202,13 +257,10 @@ class FsVolumeList {
             long timeTaken = Time.monotonicNow() - startTime;
             FsDatasetImpl.LOG.info("Time to add replicas to map for block pool"
                 + " " + bpid + " on volume " + v + ": " + timeTaken + "ms");
-          } catch (ClosedChannelException e) {
-            FsDatasetImpl.LOG.info("The volume " + v + " is closed while " +
-                "adding replicas, ignored.");
           } catch (IOException ioe) {
             FsDatasetImpl.LOG.info("Caught exception while adding replicas " +
                 "from " + v + ". Will throw later.", ioe);
-            exceptions.add(ioe);
+            unhealthyDataDirs.put(v, ioe);
           }
         }
       };
@@ -222,13 +274,13 @@ class FsVolumeList {
         throw new IOException(ie);
       }
     }
-    if (!exceptions.isEmpty()) {
-      throw exceptions.get(0);
-    }
     long totalTimeTaken = Time.monotonicNow() - totalStartTime;
     FsDatasetImpl.LOG
         .info("Total time to add all replicas to map for block pool " + bpid
             + ": " + totalTimeTaken + "ms");
+    if (!unhealthyDataDirs.isEmpty()) {
+      throw new AddBlockPoolException(unhealthyDataDirs);
+    }
   }
 
   /**
@@ -290,15 +342,22 @@ class FsVolumeList {
    *
    * @param ref       a reference to the new FsVolumeImpl instance.
    */
-  void addVolume(FsVolumeReference ref) {
+  void addVolume(FsVolumeReference ref) throws IOException {
     FsVolumeImpl volume = (FsVolumeImpl) ref.getVolume();
     volumes.add(volume);
+    if (isSameDiskTieringApplied(volume)) {
+      mountVolumeMap.addVolume(volume);
+      URI uri = volume.getStorageLocation().getUri();
+      if (capacityRatioMap.containsKey(uri)) {
+        mountVolumeMap.setCapacityRatio(volume, capacityRatioMap.get(uri));
+      }
+    }
     if (blockScanner != null) {
       blockScanner.addVolumeScanner(ref);
     } else {
       // If the volume is not put into a volume scanner, it does not need to
       // hold the reference.
-      IOUtils.cleanup(null, ref);
+      IOUtils.cleanupWithLogger(null, ref);
     }
     // If the volume is used to replace a failed volume, it needs to reset the
     // volume failure info for this volume.
@@ -313,6 +372,9 @@ class FsVolumeList {
    */
   private void removeVolume(FsVolumeImpl target) {
     if (volumes.remove(target)) {
+      if (isSameDiskTieringApplied(target)) {
+        mountVolumeMap.removeVolume(target);
+      }
       if (blockScanner != null) {
         blockScanner.removeVolumeScanner(target);
       }
@@ -331,6 +393,14 @@ class FsVolumeList {
             " does not exist or is removed by others.");
       }
     }
+  }
+
+  /**
+   * Check if same disk tiering is applied to the volume.
+   */
+  private boolean isSameDiskTieringApplied(FsVolumeImpl target) {
+    return enableSameDiskTiering
+        && StorageType.allowSameDiskTiering(target.getStorageType());
   }
 
   /**
@@ -398,9 +468,8 @@ class FsVolumeList {
 
   void addBlockPool(final String bpid, final Configuration conf) throws IOException {
     long totalStartTime = Time.monotonicNow();
-    
-    final List<IOException> exceptions = Collections.synchronizedList(
-        new ArrayList<IOException>());
+    final Map<FsVolumeSpi, IOException> unhealthyDataDirs =
+        new ConcurrentHashMap<FsVolumeSpi, IOException>();
     List<Thread> blockPoolAddingThreads = new ArrayList<Thread>();
     for (final FsVolumeImpl v : volumes) {
       Thread t = new Thread() {
@@ -413,12 +482,10 @@ class FsVolumeList {
             long timeTaken = Time.monotonicNow() - startTime;
             FsDatasetImpl.LOG.info("Time taken to scan block pool " + bpid +
                 " on " + v + ": " + timeTaken + "ms");
-          } catch (ClosedChannelException e) {
-            // ignore.
           } catch (IOException ioe) {
             FsDatasetImpl.LOG.info("Caught exception while scanning " + v +
                 ". Will throw later.", ioe);
-            exceptions.add(ioe);
+            unhealthyDataDirs.put(v, ioe);
           }
         }
       };
@@ -432,15 +499,14 @@ class FsVolumeList {
         throw new IOException(ie);
       }
     }
-    if (!exceptions.isEmpty()) {
-      throw exceptions.get(0);
-    }
-    
     long totalTimeTaken = Time.monotonicNow() - totalStartTime;
     FsDatasetImpl.LOG.info("Total time to scan all replicas for block pool " +
         bpid + ": " + totalTimeTaken + "ms");
+    if (!unhealthyDataDirs.isEmpty()) {
+      throw new AddBlockPoolException(unhealthyDataDirs);
+    }
   }
-  
+
   void removeBlockPool(String bpid, Map<DatanodeStorage, BlockListAsLongs>
       blocksPerVolume) {
     for (FsVolumeImpl v : volumes) {

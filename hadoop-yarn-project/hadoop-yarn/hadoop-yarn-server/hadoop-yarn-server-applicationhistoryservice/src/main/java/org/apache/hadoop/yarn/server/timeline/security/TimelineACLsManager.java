@@ -38,7 +38,7 @@ import org.apache.hadoop.yarn.server.timeline.EntityIdentifier;
 import org.apache.hadoop.yarn.server.timeline.TimelineStore;
 import org.apache.hadoop.yarn.util.StringHelper;
 
-import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -127,12 +127,9 @@ public class TimelineACLsManager {
     String owner = aclExt.owner;
     AccessControlList domainACL = aclExt.acls.get(applicationAccessType);
     if (domainACL == null) {
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("ACL not found for access-type " + applicationAccessType
-            + " for domain " + entity.getDomainId() + " owned by "
-            + owner + ". Using default ["
-            + YarnConfiguration.DEFAULT_YARN_APP_ACL + "]");
-      }
+      LOG.debug("ACL not found for access-type {} for domain {} owned by {}."
+          + " Using default [{}]", applicationAccessType,
+          entity.getDomainId(), owner, YarnConfiguration.DEFAULT_YARN_APP_ACL);
       domainACL =
           new AccessControlList(YarnConfiguration.DEFAULT_YARN_APP_ACL);
     }

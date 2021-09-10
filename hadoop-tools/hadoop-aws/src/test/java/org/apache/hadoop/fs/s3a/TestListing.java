@@ -18,10 +18,13 @@
 
 package org.apache.hadoop.fs.s3a;
 
-import org.apache.hadoop.fs.FileStatus;
-import org.apache.hadoop.fs.LocatedFileStatus;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.RemoteIterator;
+import org.apache.hadoop.fs.statistics.IOStatistics;
+import org.apache.hadoop.fs.statistics.IOStatisticsSource;
+import org.apache.hadoop.fs.statistics.impl.IOStatisticsStore;
+
+import org.assertj.core.api.Assertions;
 import org.junit.Assert;
 import org.junit.Test;
 
@@ -32,33 +35,48 @@ import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.Set;
 
-import static org.apache.hadoop.fs.s3a.S3AUtils.ACCEPT_ALL;
-import static org.apache.hadoop.fs.s3a.Listing.ProvidedFileStatusIterator;
+import static org.apache.hadoop.fs.statistics.IOStatisticAssertions.extractStatistics;
+import static org.apache.hadoop.fs.statistics.IOStatisticAssertions.verifyStatisticCounterValue;
+import static org.apache.hadoop.fs.statistics.StoreStatisticNames.OBJECT_LIST_REQUEST;
+import static org.apache.hadoop.fs.statistics.impl.IOStatisticsBinding.iostatisticsStore;
+import static org.apache.hadoop.test.LambdaTestUtils.intercept;
 
 /**
  * Place for the S3A listing classes; keeps all the small classes under control.
  */
 public class TestListing extends AbstractS3AMockTest {
 
-  private static class MockRemoteIterator<FileStatus> implements
-      RemoteIterator<FileStatus> {
-    private Iterator<FileStatus> iterator;
+  private static class MockRemoteIterator<S3AFileStatus> implements
+      RemoteIterator<S3AFileStatus>, IOStatisticsSource {
 
-    MockRemoteIterator(Collection<FileStatus> source) {
+    private final IOStatisticsStore ioStatistics;
+
+    private Iterator<S3AFileStatus> iterator;
+
+    MockRemoteIterator(Collection<S3AFileStatus> source) {
       iterator = source.iterator();
+      this.ioStatistics = iostatisticsStore()
+          .withDurationTracking(OBJECT_LIST_REQUEST)
+          .build();
+      ioStatistics.incrementCounter(OBJECT_LIST_REQUEST);
     }
 
     public boolean hasNext() {
       return iterator.hasNext();
     }
 
-    public FileStatus next() {
+    public S3AFileStatus next() {
       return iterator.next();
+    }
+
+    @Override
+    public IOStatistics getIOStatistics() {
+      return ioStatistics;
     }
   }
 
-  private FileStatus blankFileStatus(Path path) {
-    return new FileStatus(0, true, 0, 0, 0, path);
+  private S3AFileStatus blankFileStatus(Path path) {
+    return new S3AFileStatus(Tristate.UNKNOWN, path, null);
   }
 
   @Test
@@ -66,11 +84,9 @@ public class TestListing extends AbstractS3AMockTest {
     Path parent = new Path("/parent");
     Path liveChild = new Path(parent, "/liveChild");
     Path deletedChild = new Path(parent, "/deletedChild");
-    Path[] allFiles = {parent, liveChild, deletedChild};
-    Path[] liveFiles = {parent, liveChild};
 
-    Listing listing = new Listing(fs);
-    Collection<FileStatus> statuses = new ArrayList<>();
+    Listing listing = fs.getListing();
+    Collection<S3AFileStatus> statuses = new ArrayList<>();
     statuses.add(blankFileStatus(parent));
     statuses.add(blankFileStatus(liveChild));
     statuses.add(blankFileStatus(deletedChild));
@@ -78,11 +94,11 @@ public class TestListing extends AbstractS3AMockTest {
     Set<Path> tombstones = new HashSet<>();
     tombstones.add(deletedChild);
 
-    RemoteIterator<FileStatus> sourceIterator = new MockRemoteIterator(
+    RemoteIterator<S3AFileStatus> sourceIterator = new MockRemoteIterator(
         statuses);
-    RemoteIterator<LocatedFileStatus> locatedIterator =
+    RemoteIterator<S3ALocatedFileStatus> locatedIterator =
         listing.createLocatedFileStatusIterator(sourceIterator);
-    RemoteIterator<LocatedFileStatus> reconcilingIterator =
+    RemoteIterator<S3ALocatedFileStatus> reconcilingIterator =
         listing.createTombstoneReconcilingIterator(locatedIterator, tombstones);
 
     Set<Path> expectedPaths = new HashSet<>();
@@ -93,26 +109,31 @@ public class TestListing extends AbstractS3AMockTest {
     while (reconcilingIterator.hasNext()) {
       actualPaths.add(reconcilingIterator.next().getPath());
     }
-    Assert.assertTrue(actualPaths.equals(expectedPaths));
+    Assertions.assertThat(actualPaths)
+        .describedAs("paths from iterator")
+        .isEqualTo(expectedPaths);
+
+    // now verify the stats went all the way through.
+    IOStatistics iostats = extractStatistics(reconcilingIterator);
+    verifyStatisticCounterValue(iostats, OBJECT_LIST_REQUEST, 1);
   }
 
   @Test
   public void testProvidedFileStatusIteratorEnd() throws Exception {
-    FileStatus[] statuses = {
-        new FileStatus(100, false, 1, 8192, 0, new Path("s3a://blah/blah"))
+    S3AFileStatus s3aStatus = new S3AFileStatus(
+        100, 0, new Path("s3a://blah/blah"),
+        8192, null, null, null);
+
+    S3AFileStatus[] statuses = {
+        s3aStatus
     };
-    ProvidedFileStatusIterator it = new ProvidedFileStatusIterator(statuses,
-        ACCEPT_ALL, new Listing.AcceptAllButS3nDirs());
+    RemoteIterator<S3AFileStatus> it = Listing.toProvidedFileStatusIterator(
+        statuses);
 
     Assert.assertTrue("hasNext() should return true first time", it.hasNext());
-    Assert.assertNotNull("first element should not be null", it.next());
+    Assert.assertEquals("first element from iterator",
+        s3aStatus, it.next());
     Assert.assertFalse("hasNext() should now be false", it.hasNext());
-    try {
-      it.next();
-      Assert.fail("next() should have thrown exception");
-    } catch (NoSuchElementException e) {
-      // Correct behavior.  Any other exceptions are propagated as failure.
-      return;
-    }
+    intercept(NoSuchElementException.class, it::next);
   }
 }

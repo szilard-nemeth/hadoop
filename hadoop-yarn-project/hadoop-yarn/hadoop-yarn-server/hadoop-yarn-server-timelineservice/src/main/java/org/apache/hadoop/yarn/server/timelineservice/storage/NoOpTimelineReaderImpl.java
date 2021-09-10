@@ -19,6 +19,7 @@
 package org.apache.hadoop.yarn.server.timelineservice.storage;
 
 import org.apache.hadoop.service.AbstractService;
+import org.apache.hadoop.yarn.api.records.timeline.TimelineHealth;
 import org.apache.hadoop.yarn.api.records.timelineservice.TimelineEntity;
 import org.apache.hadoop.yarn.server.timelineservice.reader.TimelineDataToRetrieve;
 import org.apache.hadoop.yarn.server.timelineservice.reader.TimelineEntityFilters;
@@ -50,10 +51,8 @@ public class NoOpTimelineReaderImpl extends AbstractService
   @Override
   public TimelineEntity getEntity(TimelineReaderContext context,
        TimelineDataToRetrieve dataToRetrieve) throws IOException {
-    if(LOG.isDebugEnabled()){
-      LOG.debug("NoOpTimelineReader is configured. Response to all the read " +
+    LOG.debug("NoOpTimelineReader is configured. Response to all the read " +
               "requests would be empty");
-    }
     return new TimelineEntity();
   }
 
@@ -61,20 +60,22 @@ public class NoOpTimelineReaderImpl extends AbstractService
   public Set<TimelineEntity> getEntities(TimelineReaderContext context,
           TimelineEntityFilters filters, TimelineDataToRetrieve dataToRetrieve)
           throws IOException {
-    if(LOG.isDebugEnabled()){
-      LOG.debug("NoOpTimelineReader is configured. Response to all the read " +
+    LOG.debug("NoOpTimelineReader is configured. Response to all the read " +
               "requests would be empty");
-    }
     return new HashSet<>();
   }
 
   @Override
   public Set<String> getEntityTypes(TimelineReaderContext context)
           throws IOException {
-    if(LOG.isDebugEnabled()){
-      LOG.debug("NoOpTimelineReader is configured. Response to all the read " +
+    LOG.debug("NoOpTimelineReader is configured. Response to all the read " +
               "requests would be empty");
-    }
     return new HashSet<>();
+  }
+
+  @Override
+  public TimelineHealth getHealthStatus() {
+    return new TimelineHealth(TimelineHealth.TimelineHealthStatus.RUNNING,
+        "NoOpTimelineReader is configured. ");
   }
 }

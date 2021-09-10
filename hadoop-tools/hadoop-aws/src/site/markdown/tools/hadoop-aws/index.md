@@ -16,23 +16,36 @@
 
 <!-- MACRO{toc|fromDepth=0|toDepth=2} -->
 
-**NOTE:  Hadoop's `s3:` and `s3n:` connectors have been removed.
-Please use `s3a:` as the connector to data hosted in S3 with Apache Hadoop.**
-
-**Consult the [s3n documentation](./s3n.html) for migration instructions.**
 
 
-See also:
+## <a name="compatibility"></a> Compatibility
+
+
+###  <a name="directory-marker-compatibility"></a> Directory Marker Compatibility
+
+1. This release can safely list/index/read S3 buckets where "empty directory"
+markers are retained.
+
+1. This release can be configured to retain these directory makers at the
+expense of being backwards incompatible.
+
+Consult [Controlling the S3A Directory Marker Behavior](directory_markers.html) for
+full details.
+
+## <a name="documents"></a> Documents
 
 * [Encryption](./encryption.html)
 * [Performance](./performance.html)
 * [S3Guard](./s3guard.html)
 * [Troubleshooting](./troubleshooting_s3a.html)
+* [Controlling the S3A Directory Marker Behavior](directory_markers.html).
 * [Committing work to S3 with the "S3A Committers"](./committers.html)
 * [S3A Committers Architecture](./committer_architecture.html)
 * [Working with IAM Assumed Roles](./assumed_roles.html)
 * [S3A Delegation Token Support](./delegation_tokens.html)
 * [S3A Delegation Token Architecture](delegation_token_architecture.html).
+* [Auditing](./auditing.html).
+* [Auditing Architecture](./auditing_architecture.html).
 * [Testing](./testing.html)
 
 ## <a name="overview"></a> Overview
@@ -70,11 +83,12 @@ schemes.
 * Supports authentication via: environment variables, Hadoop configuration
 properties, the Hadoop key management store and IAM roles.
 * Supports per-bucket configuration.
-* With [S3Guard](./s3guard.html), adds high performance and consistent metadata/
-directory read operations. This delivers consistency as well as speed.
 * Supports S3 "Server Side Encryption" for both reading and writing:
  SSE-S3, SSE-KMS and SSE-C
 * Instrumented with Hadoop metrics.
+* Before S3 was consistent, provided a consistent view of inconsistent storage
+  through [S3Guard](./s3guard.html).
+
 * Actively maintained by the open source community.
 
 
@@ -159,7 +173,7 @@ the number of files, during which time partial updates may be visible. If
 the operations are interrupted, the filesystem is left in an intermediate state.
 
 
-### Warning #2: Directories are mimiced
+### Warning #2: Directories are mimicked
 
 The S3A clients mimics directories by:
 
@@ -184,7 +198,7 @@ Parts of Hadoop relying on this can have unexpected behaviour. E.g. the
 performance recursive listings whenever possible.
 * It is possible to create files under files if the caller tries hard.
 * The time to rename a directory is proportional to the number of files
-underneath it (directory or indirectly) and the size of the files. (The copyis
+underneath it (directory or indirectly) and the size of the files. (The copy is
 executed inside the S3 storage, so the time is independent of the bandwidth
 from client to S3).
 * Directory renames are not atomic: they can fail partway through, and callers
@@ -320,7 +334,7 @@ export AWS_SECRET_ACCESS_KEY=my.secret.key
 
 If the environment variable `AWS_SESSION_TOKEN` is set, session authentication
 using "Temporary Security Credentials" is enabled; the Key ID and secret key
-must be set to the credentials for that specific sesssion.
+must be set to the credentials for that specific session.
 
 ```bash
 export AWS_SESSION_TOKEN=SECRET-SESSION-TOKEN
@@ -345,7 +359,7 @@ the Hadoop configuration files.
 
 By default, the S3A client follows the following authentication chain:
 
-1. The options `fs.s3a.access.key`, `fs.s3a.secret.key` and `fs.s3a.sesson.key
+1. The options `fs.s3a.access.key`, `fs.s3a.secret.key` and `fs.s3a.sesson.key`
 are looked for in the Hadoop XML configuration/Hadoop credential providers,
 returning a set of session credentials if all three are defined.
 1. The `fs.s3a.access.key` and `fs.s3a.secret.key` are looked for in the Hadoop
@@ -399,6 +413,37 @@ Applications running in EC2 may associate an IAM role with the VM and query the
 for credentials to access S3.  Within the AWS SDK, this functionality is
 provided by `InstanceProfileCredentialsProvider`, which internally enforces a
 singleton instance in order to prevent throttling problem.
+
+### <a name="auth_named_profile"></a> Using Named Profile Credentials with `ProfileCredentialsProvider`
+
+You can configure Hadoop to authenticate to AWS using a [named profile](https://docs.aws.amazon.com/cli/latest/userguide/cli-configure-profiles.html).
+
+To authenticate with a named profile:
+
+1. Declare `com.amazonaws.auth.profile.ProfileCredentialsProvider` as the provider.
+1. Set your profile via the `AWS_PROFILE` environment variable.
+1. Due to a [bug in version 1 of the AWS Java SDK](https://github.com/aws/aws-sdk-java/issues/803),
+you'll need to remove the `profile` prefix from the AWS configuration section heading.
+
+    Here's an example of what your AWS configuration files should look like:
+
+    ```
+    $ cat ~/.aws/config
+    [user1]
+    region = us-east-1
+    $ cat ~/.aws/credentials
+    [user1]
+    aws_access_key_id = ...
+    aws_secret_access_key = ...
+    aws_session_token = ...
+    aws_security_token = ...
+    ```
+Note:
+
+1. The `region` setting is only used if `fs.s3a.endpoint.region` is set to the empty string.
+1. For the credentials to be available to applications running in a Hadoop cluster, the
+   configuration files MUST be in the `~/.aws/` directory on the local filesystem in
+   all hosts in the cluster.
 
 ### <a name="auth_session"></a> Using Session Credentials with `TemporaryAWSCredentialsProvider`
 
@@ -509,7 +554,7 @@ This means that the default S3A authentication chain can be defined as
     to directly authenticate with S3 and DynamoDB services.
     When S3A Delegation tokens are enabled, depending upon the delegation
     token binding it may be used
-    to communicate wih the STS endpoint to request session/role
+    to communicate with the STS endpoint to request session/role
     credentials.
 
     These are loaded and queried in sequence for a valid set of credentials.
@@ -537,10 +582,10 @@ This means that the default S3A authentication chain can be defined as
        Uses the values of fs.s3a.access.key and fs.s3a.secret.key.
     * com.amazonaws.auth.EnvironmentVariableCredentialsProvider: supports
         configuration of AWS access key ID and secret access key in
-        environment variables named AWS_ACCESS_KEY_ID and
-        AWS_SECRET_ACCESS_KEY, as documented in the AWS SDK.
-    * com.amazonaws.auth.InstanceProfileCredentialsProvider: supports use
-        of instance profile credentials if running in an EC2 VM.
+        environment variables named AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
+        and AWS_SESSION_TOKEN as documented in the AWS SDK.
+    * org.apache.hadoop.fs.s3a.auth.IAMInstanceCredentialsProvider: picks up
+       IAM credentials of any EC2 VM or AWS container in which the process is running.
   </description>
 </property>
 ```
@@ -605,13 +650,13 @@ The S3A configuration options with sensitive data
 and `fs.s3a.server-side-encryption.key`) can
 have their data saved to a binary file stored, with the values being read in
 when the S3A filesystem URL is used for data access. The reference to this
-credential provider then declareed in the hadoop configuration.
+credential provider then declared in the Hadoop configuration.
 
 For additional reading on the Hadoop Credential Provider API see:
 [Credential Provider API](../../../hadoop-project-dist/hadoop-common/CredentialProviderAPI.html).
 
 
-The following configuration options can be storeed in Hadoop Credential Provider
+The following configuration options can be stored in Hadoop Credential Provider
 stores.
 
 ```
@@ -700,7 +745,7 @@ of credentials.
 
 ### Using secrets from credential providers
 
-Once the provider is set in the Hadoop configuration, hadoop commands
+Once the provider is set in the Hadoop configuration, Hadoop commands
 work exactly as if the secrets were in an XML file.
 
 ```bash
@@ -736,7 +781,7 @@ used to change the endpoint, encryption and authentication mechanisms of buckets
 S3Guard options, various minor options.
 
 Here are the S3A properties for use in production. The S3Guard options are
-documented in the [S3Guard documenents](./s3guard.html); some testing-related
+documented in the [S3Guard documents](./s3guard.html); some testing-related
 options are covered in [Testing](./testing.md).
 
 ```xml
@@ -757,6 +802,16 @@ options are covered in [Testing](./testing.md).
   <description>AWS S3 endpoint to connect to. An up-to-date list is
     provided in the AWS Documentation: regions and endpoints. Without this
     property, the standard region (s3.amazonaws.com) is assumed.
+  </description>
+</property>
+
+<property>
+  <name>fs.s3a.endpoint.region</name>
+  <description>AWS S3 region for a bucket, which bypasses the parsing of
+    fs.s3a.endpoint to know the region. Would be helpful in avoiding errors
+    while using privateLink URL and explicitly set the bucket region.
+    If set to a blank string (or 1+ space), falls back to the
+    (potentially brittle) SDK region resolution process.
   </description>
 </property>
 
@@ -860,7 +915,7 @@ options are covered in [Testing](./testing.md).
 
 <property>
   <name>fs.s3a.multipart.size</name>
-  <value>100M</value>
+  <value>64M</value>
   <description>How big (in bytes) to split upload or copy operations up into.
     A suffix from the set {K,M,G,T,P} may be used to scale the numeric value.
   </description>
@@ -868,7 +923,7 @@ options are covered in [Testing](./testing.md).
 
 <property>
   <name>fs.s3a.multipart.threshold</name>
-  <value>2147483647</value>
+  <value>128MB</value>
   <description>How big (in bytes) to split upload or copy operations up into.
     This also controls the partition size in renamed files, as rename() involves
     copying the source file(s).
@@ -889,7 +944,9 @@ options are covered in [Testing](./testing.md).
   <name>fs.s3a.acl.default</name>
   <description>Set a canned ACL for newly created and copied objects. Value may be Private,
     PublicRead, PublicReadWrite, AuthenticatedRead, LogDeliveryWrite, BucketOwnerRead,
-    or BucketOwnerFullControl.</description>
+    or BucketOwnerFullControl.
+    If set, caller IAM role must have "s3:PutObjectAcl" permission on the bucket.
+    </description>
 </property>
 
 <property>
@@ -983,6 +1040,43 @@ options are covered in [Testing](./testing.md).
   <description>Select which version of the S3 SDK's List Objects API to use.
   Currently support 2 (default) and 1 (older API).</description>
 </property>
+
+<property>
+  <name>fs.s3a.connection.request.timeout</name>
+  <value>0</value>
+  <description>
+  Time out on HTTP requests to the AWS service; 0 means no timeout.
+  Measured in seconds; the usual time suffixes are all supported
+
+  Important: this is the maximum duration of any AWS service call,
+  including upload and copy operations. If non-zero, it must be larger
+  than the time to upload multi-megabyte blocks to S3 from the client,
+  and to rename many-GB files. Use with care.
+
+  Values that are larger than Integer.MAX_VALUE milliseconds are
+  converged to Integer.MAX_VALUE milliseconds
+  </description>
+</property>
+
+<property>
+  <name>fs.s3a.bucket.probe</name>
+  <value>0</value>
+  <description>
+     The value can be 0 (default), 1 or 2.
+     When set to 0, bucket existence checks won't be done
+     during initialization thus making it faster.
+     Though it should be noted that when the bucket is not available in S3,
+     or if fs.s3a.endpoint points to the wrong instance of a private S3 store
+     consecutive calls like listing, read, write etc. will fail with
+     an UnknownStoreException.
+     When set to 1, the bucket existence check will be done using the
+     V1 API of the S3 protocol which doesn't verify the client's permissions
+     to list or read data in the bucket.
+     When set to 2, the bucket existence check will be done using the
+     V2 API of the S3 protocol which does verify that the
+     client has permission to read the bucket.
+  </description>
+</property>
 ```
 
 ## <a name="retry_and_recovery"></a>Retry and Recovery
@@ -1018,7 +1112,7 @@ is unrecoverable; it's the generic "No" response. Very rarely it
 does recover, which is why it is in this category, rather than that
 of unrecoverable failures.
 
-These failures will be retried with a fixed sleep interval set in
+These failures will be retried with an exponential sleep interval set in
 `fs.s3a.retry.interval`, up to the limit set in `fs.s3a.retry.limit`.
 
 
@@ -1033,7 +1127,7 @@ after the request was processed by S3.
 * "No response from Server" (443, 444) HTTP responses.
 * Any other AWS client, service or S3 exception.
 
-These failures will be retried with a fixed sleep interval set in
+These failures will be retried with an exponential sleep interval set in
 `fs.s3a.retry.interval`, up to the limit set in `fs.s3a.retry.limit`.
 
 *Important*: DELETE is considered idempotent, hence: `FileSystem.delete()`
@@ -1143,6 +1237,131 @@ the capacity through `hadoop s3guard set-capacity` (and pay more, obviously).
 1. KMS: "consult AWS about increasing your capacity".
 
 
+
+## Handling Read-During-Overwrite
+
+Read-during-overwrite is the condition where a writer overwrites a file while
+a reader has an open input stream on the file.  Depending on configuration,
+the S3AFileSystem may detect this and throw a `RemoteFileChangedException` in
+conditions where the reader's input stream might otherwise silently switch over
+from reading bytes from the original version of the file to reading bytes from
+the new version.
+
+The configurations items controlling this behavior are:
+
+```xml
+<property>
+  <name>fs.s3a.change.detection.source</name>
+  <value>etag</value>
+  <description>
+    Select which S3 object attribute to use for change detection.
+    Currently support 'etag' for S3 object eTags and 'versionid' for
+    S3 object version IDs.  Use of version IDs requires object versioning to be
+    enabled for each S3 bucket utilized.  Object versioning is disabled on
+    buckets by default. When version ID is used, the buckets utilized should
+    have versioning enabled before any data is written.
+  </description>
+</property>
+
+<property>
+  <name>fs.s3a.change.detection.mode</name>
+  <value>server</value>
+  <description>
+    Determines how change detection is applied to alert to S3 objects
+    rewritten while being read. Value 'server' indicates to apply the attribute
+    constraint directly on GetObject requests to S3. Value 'client' means to do a
+    client-side comparison of the attribute value returned in the response.  Value
+    'server' would not work with third-party S3 implementations that do not
+    support these constraints on GetObject. Values 'server' and 'client' generate
+    RemoteObjectChangedException when a mismatch is detected.  Value 'warn' works
+    like 'client' but generates only a warning.  Value 'none' will ignore change
+    detection completely.
+  </description>
+</property>
+
+<property>
+  <name>fs.s3a.change.detection.version.required</name>
+  <value>true</value>
+  <description>
+    Determines if S3 object version attribute defined by
+    fs.s3.change.detection.source should be treated as required.  If true and the
+    referred attribute is unavailable in an S3 GetObject response,
+    NoVersionAttributeException is thrown.  Setting to 'true' is encouraged to
+    avoid potential for inconsistent reads with third-party S3 implementations or
+    against S3 buckets that have object versioning disabled.
+  </description>
+</property>
+```
+
+In the default configuration, S3 object eTags are used to detect changes.  When
+the filesystem retrieves a file from S3 using
+[Get Object](https://docs.aws.amazon.com/AmazonS3/latest/API/RESTObjectGET.html),
+it captures the eTag and uses that eTag in an `If-Match` condition on each
+subsequent request.  If a concurrent writer has overwritten the file, the
+'If-Match' condition will fail and a `RemoteFileChangedException` will be thrown.
+
+Even in this default configuration, a new write may not trigger this exception
+on an open reader.  For example, if the reader only reads forward in the file
+then only a single S3 'Get Object' request is made and the full contents of the
+file are streamed from a single response.  An overwrite of the file after the
+'Get Object' request would not be seen at all by a reader with an input stream
+that had already read the first byte.  Seeks backward on the other hand can
+result in new 'Get Object' requests that can trigger the
+`RemoteFileChangedException`.
+
+Additionally, due to the eventual consistency of S3 in a read-after-overwrite
+scenario, visibility of a new write may be delayed, avoiding the
+`RemoteFileChangedException` for some readers.  That said, if a reader does not
+see `RemoteFileChangedException`, they will have at least read a consistent view
+of a single version of the file (the version available when they started
+reading).
+
+### Change detection with S3 Versions.
+
+It is possible to switch to using the
+[S3 object version id](https://docs.aws.amazon.com/AmazonS3/latest/dev/ObjectVersioning.html)
+instead of eTag as the change detection mechanism.  Use of this option requires
+object versioning to be enabled on any S3 buckets used by the filesystem.  The
+benefit of using version id instead of eTag is potentially reduced frequency
+of `RemoteFileChangedException`. With object versioning enabled, old versions
+of objects remain available after they have been overwritten.
+This means an open input stream will still be able to seek backwards after a
+concurrent writer has overwritten the file.
+The reader will retain their consistent view of the version of the file from
+which they read the first byte.
+Because the version ID is null for objects written prior to enablement of
+object versioning, **this option should only be used when the S3 buckets
+have object versioning enabled from the beginning.**
+
+Note: when you rename files the copied files may have a different version number.
+
+### Change Detection Modes.
+
+Configurable change detection mode is the next option.  Different modes are
+available primarily for compatibility with third-party S3 implementations which
+may not support all change detection mechanisms.
+
+* `server`: the version/etag check is performed on the server by adding
+extra headers to the `GET` request. This is the default.
+* `client` : check on the client by comparing the eTag/version ID of a
+reopened file with the previous version.
+This is useful when the implementation doesn't support the `If-Match` header.
+* `warn`: check on the client, but only warn on a mismatch, rather than fail.
+* `none` do not check. Useful if the implementation doesn't provide eTag
+or version ID support at all or you would like to retain previous behavior
+where the reader's input stream silently switches over to the new object version
+(not recommended).
+
+The final option (`fs.s3a.change.detection.version.required`) is present
+primarily to ensure the filesystem doesn't silently ignore the condition
+where it is configured to use version ID on a bucket that doesn't have
+object versioning enabled or alternatively it is configured to use eTag on
+an S3 implementation that doesn't return eTags.
+
+When `true` (default) and 'Get Object' doesn't return eTag or
+version ID (depending on configured 'source'), a `NoVersionAttributeException`
+will be thrown.  When `false` and and eTag or version ID is not returned,
+the stream can be read, but without any version checking.
 
 
 ## <a name="per_bucket_configuration"></a>Configuring different S3 buckets with Per-Bucket Configuration
@@ -1754,3 +1973,61 @@ To disable checksum verification in `distcp`, use the `-skipcrccheck` option:
 hadoop distcp -update -skipcrccheck -numListstatusThreads 40 /user/alice/datasets s3a://alice-backup/datasets
 ```
 
+### <a name="customsigners"></a> Advanced - Custom Signers
+
+AWS uees request signing to authenticate requests. In general, there should
+be no need to override the signers, and the defaults work out of the box.
+If, however, this is required - this section talks about how to configure
+custom signers. There’s 2 broad config categories to be set - one for
+registering a custom signer and another to specify usage.
+
+#### Registering Custom Signers
+```xml
+<property>
+  <name>fs.s3a.custom.signers</name>
+  <value>comma separated list of signers</value>
+  <!-- Example
+  <value>AWS4SignerType,CS1:CS1ClassName,CS2:CS2ClassName:CS2InitClass</value>
+  -->
+</property>
+```
+Acceptable value for each custom signer
+
+`SignerName`- this is used in case one of the default signers is being used.
+(E.g `AWS4SignerType`, `QueryStringSignerType`, `AWSS3V4SignerType`).
+If no custom signers are being used - this value does not need to be set.
+
+`SignerName:SignerClassName` - register a new signer with the specified name,
+and the class for this signer.
+The Signer Class must implement `com.amazonaws.auth.Signer`.
+
+`SignerName:SignerClassName:SignerInitializerClassName` - similar time above
+except also allows for a custom SignerInitializer
+(`org.apache.hadoop.fs.s3a.AwsSignerInitializer`) class to be specified.
+
+#### Usage of the Signers
+Signers can be set at a per service level(S3, dynamodb, etc) or a common
+signer for all services.
+
+```xml
+<property>
+  <name>fs.s3a.s3.signing-algorithm</name>
+  <value>${S3SignerName}</value>
+  <description>Specify the signer for S3</description>
+</property>
+
+<property>
+  <name>fs.s3a.ddb.signing-algorithm</name>
+  <value>${DdbSignerName}</value>
+  <description>Specify the signer for DDB</description>
+</property>
+
+<property>
+  <name>fs.s3a.signing-algorithm</name>
+  <value>${SignerName}</value>
+</property>
+```
+
+For a specific service, the service specific signer is looked up first.
+If that is not specified, the common signer is looked up. If this is
+not specified as well, SDK settings are used.

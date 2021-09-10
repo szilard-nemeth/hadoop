@@ -20,9 +20,6 @@ package org.apache.hadoop.hdfs.server.diskbalancer.command;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectReader;
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
-import com.google.common.collect.Lists;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.Option;
@@ -50,16 +47,20 @@ import org.apache.hadoop.hdfs.tools.DiskBalancerCLI;
 import org.apache.hadoop.net.NetUtils;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.util.HostsFileReader;
+import org.apache.hadoop.util.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
+
 import java.io.Closeable;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URL;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
 import java.util.Collections;
@@ -274,7 +275,7 @@ public abstract class Command extends Configured implements Closeable {
       try {
         HostsFileReader.readFileToSet("include",
             Paths.get(listURL.getPath()).toString(), resultSet);
-      } catch (FileNotFoundException e) {
+      } catch (NoSuchFileException e) {
         String warnMsg = String
             .format("The input host file path '%s' is not a valid path. "
                 + "Please make sure the host file exists.", listArg);

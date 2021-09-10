@@ -19,6 +19,7 @@
 package org.apache.hadoop.yarn.client.api.impl;
 
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.lang.reflect.UndeclaredThrowableException;
 import java.net.ConnectException;
 import java.net.HttpURLConnection;
@@ -34,8 +35,10 @@ import javax.net.ssl.HostnameVerifier;
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLSocketFactory;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.security.authentication.server.KerberosAuthenticationHandler;
+import org.apache.hadoop.security.authentication.server.PseudoAuthenticationHandler;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.hadoop.classification.InterfaceAudience.Private;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.security.UserGroupInformation;
@@ -52,9 +55,9 @@ import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.apache.hadoop.yarn.exceptions.YarnException;
 import org.apache.hadoop.yarn.webapp.YarnJacksonJaxbJsonProvider;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Joiner;
-import com.google.common.base.Preconditions;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.base.Joiner;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
 import com.sun.jersey.api.client.Client;
 import com.sun.jersey.api.client.ClientHandlerException;
 import com.sun.jersey.api.client.ClientRequest;
@@ -73,11 +76,12 @@ import com.sun.jersey.client.urlconnection.URLConnectionClientHandler;
 public class TimelineConnector extends AbstractService {
 
   private static final Joiner JOINER = Joiner.on("");
-  private static final Log LOG = LogFactory.getLog(TimelineConnector.class);
+  private static final Logger LOG =
+      LoggerFactory.getLogger(TimelineConnector.class);
   public final static int DEFAULT_SOCKET_TIMEOUT = 1 * 60 * 1000; // 1 minute
 
   private SSLFactory sslFactory;
-  private Client client;
+  Client client;
   private ConnectionConfigurator connConfigurator;
   private DelegationTokenAuthenticator authenticator;
   private DelegationTokenAuthenticatedURL.Token token;
@@ -110,8 +114,12 @@ public class TimelineConnector extends AbstractService {
     } else {
       connConfigurator = DEFAULT_TIMEOUT_CONN_CONFIGURATOR;
     }
-
-    if (UserGroupInformation.isSecurityEnabled()) {
+    String defaultAuth = UserGroupInformation.isSecurityEnabled() ?
+            KerberosAuthenticationHandler.TYPE :
+            PseudoAuthenticationHandler.TYPE;
+    String authType = conf.get(YarnConfiguration.TIMELINE_HTTP_AUTH_TYPE,
+            defaultAuth);
+    if (authType.equals(KerberosAuthenticationHandler.TYPE)) {
       authenticator = new KerberosDelegationTokenAuthenticator();
     } else {
       authenticator = new PseudoDelegationTokenAuthenticator();
@@ -199,6 +207,9 @@ public class TimelineConnector extends AbstractService {
   }
 
   protected void serviceStop() {
+    if (this.client != null) {
+      this.client.destroy();
+    }
     if (this.sslFactory != null) {
       this.sslFactory.destroy();
     }
@@ -351,7 +362,8 @@ public class TimelineConnector extends AbstractService {
           // sleep for the given time interval
           Thread.sleep(retryInterval);
         } catch (InterruptedException ie) {
-          LOG.warn("Client retry sleep interrupted! ");
+          Thread.currentThread().interrupt();
+          throw new InterruptedIOException("Client retry sleep interrupted!");
         }
       }
       throw new RuntimeException("Failed to connect to timeline server. "

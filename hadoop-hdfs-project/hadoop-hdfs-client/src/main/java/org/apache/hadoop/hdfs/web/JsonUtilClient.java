@@ -19,9 +19,8 @@ package org.apache.hadoop.hdfs.web;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectReader;
-import com.google.common.base.Preconditions;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
+import org.apache.hadoop.thirdparty.com.google.common.collect.Maps;
 import org.apache.hadoop.fs.ContentSummary;
 import org.apache.hadoop.fs.FileChecksum;
 import org.apache.hadoop.fs.FileStatus;
@@ -29,6 +28,7 @@ import org.apache.hadoop.fs.FsServerDefaults;
 import org.apache.hadoop.fs.MD5MD5CRC32CastagnoliFileChecksum;
 import org.apache.hadoop.fs.MD5MD5CRC32FileChecksum;
 import org.apache.hadoop.fs.MD5MD5CRC32GzipFileChecksum;
+import org.apache.hadoop.fs.QuotaUsage;
 import org.apache.hadoop.fs.StorageType;
 import org.apache.hadoop.fs.XAttrCodec;
 import org.apache.hadoop.fs.permission.AclEntry;
@@ -40,6 +40,7 @@ import org.apache.hadoop.hdfs.protocol.DatanodeInfo;
 import org.apache.hadoop.hdfs.protocol.ErasureCodingPolicy;
 import org.apache.hadoop.hdfs.protocol.SnapshotDiffReport;
 import org.apache.hadoop.hdfs.protocol.SnapshottableDirectoryStatus;
+import org.apache.hadoop.hdfs.protocol.SnapshotStatus;
 import org.apache.hadoop.hdfs.protocol.DatanodeInfo.DatanodeInfoBuilder;
 import org.apache.hadoop.hdfs.protocol.DirectoryListing;
 import org.apache.hadoop.hdfs.protocol.ExtendedBlock;
@@ -55,6 +56,7 @@ import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.security.token.TokenIdentifier;
 import org.apache.hadoop.util.ChunkedArrayList;
 import org.apache.hadoop.util.DataChecksum;
+import org.apache.hadoop.util.Lists;
 import org.apache.hadoop.util.StringUtils;
 
 import java.io.ByteArrayInputStream;
@@ -114,7 +116,7 @@ public class JsonUtilClient {
   }
 
   /** Convert a Json map to a HdfsFileStatus object. */
-  static HdfsFileStatus toFileStatus(final Map<?, ?> json,
+  public static HdfsFileStatus toFileStatus(final Map<?, ?> json,
       boolean includesType) {
     if (json == null) {
       return null;
@@ -157,11 +159,12 @@ public class JsonUtilClient {
     if (ecPolicyObj != null) {
       Map<String, String> extraOptions = (Map) ecPolicyObj.get("extraOptions");
       ECSchema ecSchema = new ECSchema((String) ecPolicyObj.get("codecName"),
-          (int) ecPolicyObj.get("numDataUnits"),
-          (int) ecPolicyObj.get("numParityUnits"), extraOptions);
+          (int) ((Number) ecPolicyObj.get("numDataUnits")).longValue(),
+          (int) ((Number) ecPolicyObj.get("numParityUnits")).longValue(),
+          extraOptions);
       ecPolicy = new ErasureCodingPolicy((String) ecPolicyObj.get("name"),
-          ecSchema, (int) ecPolicyObj.get("cellSize"),
-          (byte) (int) ecPolicyObj.get("id"));
+          ecSchema, (int) ((Number) ecPolicyObj.get("cellSize")).longValue(),
+          (byte) (int) ((Number) ecPolicyObj.get("id")).longValue());
 
     }
 
@@ -426,30 +429,87 @@ public class JsonUtilClient {
       return null;
     }
 
-    final Map<?, ?> m = (Map<?, ?>)json.get(
-        ContentSummary.class.getSimpleName());
+    final Map<?, ?> m = (Map<?, ?>)
+        json.get(ContentSummary.class.getSimpleName());
     final long length = ((Number) m.get("length")).longValue();
     final long fileCount = ((Number) m.get("fileCount")).longValue();
     final long directoryCount = ((Number) m.get("directoryCount")).longValue();
+    final String ecPolicy = ((String) m.get("ecPolicy"));
+    ContentSummary.Builder builder = new ContentSummary.Builder()
+        .length(length)
+        .fileCount(fileCount)
+        .directoryCount(directoryCount)
+        .erasureCodingPolicy(ecPolicy);
+    builder = buildQuotaUsage(builder, m, ContentSummary.Builder.class);
+    if (m.get("snapshotLength") != null) {
+      long snapshotLength = ((Number) m.get("snapshotLength")).longValue();
+      builder.snapshotLength(snapshotLength);
+    }
+    if (m.get("snapshotFileCount") != null) {
+      long snapshotFileCount =
+          ((Number) m.get("snapshotFileCount")).longValue();
+      builder.snapshotFileCount(snapshotFileCount);
+    }
+    if (m.get("snapshotDirectoryCount") != null) {
+      long snapshotDirectoryCount =
+          ((Number) m.get("snapshotDirectoryCount")).longValue();
+      builder.snapshotDirectoryCount(snapshotDirectoryCount);
+    }
+    if (m.get("snapshotSpaceConsumed") != null) {
+      long snapshotSpaceConsumed =
+          ((Number) m.get("snapshotSpaceConsumed")).longValue();
+      builder.snapshotSpaceConsumed(snapshotSpaceConsumed);
+    }
+    return builder.build();
+  }
+
+  /** Convert a JSON map to a QuotaUsage. */
+  static QuotaUsage toQuotaUsage(final Map<?, ?> json) {
+    if (json == null) {
+      return null;
+    }
+
+    final Map<?, ?> m = (Map<?, ?>) json.get(QuotaUsage.class.getSimpleName());
+    QuotaUsage.Builder builder = new QuotaUsage.Builder();
+    builder = buildQuotaUsage(builder, m, QuotaUsage.Builder.class);
+    return builder.build();
+  }
+
+  /**
+   * Given a builder for QuotaUsage, parse the provided map and
+   * construct the relevant fields. Return the updated builder.
+   */
+  private static <T extends QuotaUsage.Builder> T buildQuotaUsage(
+      T builder, Map<?, ?> m, Class<T> type) {
     final long quota = ((Number) m.get("quota")).longValue();
     final long spaceConsumed = ((Number) m.get("spaceConsumed")).longValue();
     final long spaceQuota = ((Number) m.get("spaceQuota")).longValue();
     final Map<?, ?> typem = (Map<?, ?>) m.get("typeQuota");
 
-    ContentSummary.Builder contentSummaryBuilder =new ContentSummary.Builder()
-        .length(length).fileCount(fileCount).directoryCount(directoryCount)
-        .quota(quota).spaceConsumed(spaceConsumed).spaceQuota(spaceQuota);
+    T result = type.cast(builder
+        .quota(quota)
+        .spaceConsumed(spaceConsumed)
+        .spaceQuota(spaceQuota));
+
+    // ContentSummary doesn't set this so check before using it
+    if (m.get("fileAndDirectoryCount") != null) {
+      final long fileAndDirectoryCount =
+          ((Number) m.get("fileAndDirectoryCount")).longValue();
+      result = type.cast(result.fileAndDirectoryCount(fileAndDirectoryCount));
+    }
+
     if (typem != null) {
       for (StorageType t : StorageType.getTypesSupportingQuota()) {
-        Map<?, ?> type = (Map<?, ?>) typem.get(t.toString());
-        if (type != null) {
-          contentSummaryBuilder = contentSummaryBuilder.typeQuota(t,
-              ((Number) type.get("quota")).longValue()).typeConsumed(t,
-              ((Number) type.get("consumed")).longValue());
+        Map<?, ?> typeQuota = (Map<?, ?>) typem.get(t.toString());
+        if (typeQuota != null) {
+          result = type.cast(result.typeQuota(t,
+              ((Number) typeQuota.get("quota")).longValue()).typeConsumed(t,
+              ((Number) typeQuota.get("consumed")).longValue()));
         }
       }
     }
-    return contentSummaryBuilder.build();
+
+    return result;
   }
 
   /** Convert a Json map to a MD5MD5CRC32FileChecksum. */
@@ -676,6 +736,9 @@ public class JsonUtilClient {
   }
 
   public static ErasureCodingPolicy toECPolicy(Map<?, ?> m) {
+    if (m == null) {
+      return null;
+    }
     byte id = ((Number) m.get("id")).byteValue();
     String name = (String) m.get("name");
     String codec = (String) m.get("codecName");
@@ -809,5 +872,40 @@ public class JsonUtilClient {
         new SnapshottableDirectoryStatus(dirStatus, snapshotNumber,
             snapshotQuota, parentFullPath);
     return snapshottableDirectoryStatus;
+  }
+
+  public static SnapshotStatus[] toSnapshotList(final Map<?, ?> json) {
+    if (json == null) {
+      return null;
+    }
+    List<?> list = (List<?>) json.get("SnapshotList");
+    if (list == null) {
+      return null;
+    }
+    SnapshotStatus[] statuses =
+        new SnapshotStatus[list.size()];
+    for (int i = 0; i < list.size(); i++) {
+      statuses[i] = toSnapshotStatus((Map<?, ?>) list.get(i));
+    }
+    return statuses;
+  }
+
+  private static SnapshotStatus toSnapshotStatus(
+      Map<?, ?> json) {
+    if (json == null) {
+      return null;
+    }
+    int snapshotID = getInt(json, "snapshotID", 0);
+    boolean isDeleted = "DELETED".equalsIgnoreCase(
+        (String)json.get("deletionStatus"));
+    String fullPath = ((String) json.get("fullPath"));
+
+    HdfsFileStatus dirStatus =
+        toFileStatus((Map<?, ?>) json.get("dirStatus"), false);
+    SnapshotStatus snapshotStatus =
+        new SnapshotStatus(dirStatus, snapshotID,
+            isDeleted, DFSUtilClient.string2Bytes(
+                SnapshotStatus.getParentPath(fullPath)));
+    return snapshotStatus;
   }
 }

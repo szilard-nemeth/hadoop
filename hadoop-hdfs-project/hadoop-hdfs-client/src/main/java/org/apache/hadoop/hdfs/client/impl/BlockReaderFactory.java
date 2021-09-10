@@ -27,10 +27,11 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.lang.reflect.Constructor;
 import java.net.InetSocketAddress;
+import java.nio.channels.UnresolvedAddressException;
 import java.util.List;
 
-import com.google.common.io.ByteArrayDataOutput;
-import com.google.common.io.ByteStreams;
+import org.apache.hadoop.thirdparty.com.google.common.io.ByteArrayDataOutput;
+import org.apache.hadoop.thirdparty.com.google.common.io.ByteStreams;
 import org.apache.commons.lang3.mutable.MutableBoolean;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
@@ -73,8 +74,8 @@ import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.util.PerformanceAdvisory;
 import org.apache.hadoop.util.Time;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -86,6 +87,7 @@ import org.slf4j.LoggerFactory;
 @InterfaceAudience.Private
 public class BlockReaderFactory implements ShortCircuitReplicaCreator {
   static final Logger LOG = LoggerFactory.getLogger(BlockReaderFactory.class);
+  private static final int SMALL_BUFFER_SIZE = 512;
 
   public static class FailureInjector {
     public void injectRequestFileDescriptorsFailure() throws IOException {
@@ -474,7 +476,8 @@ public class BlockReaderFactory implements ShortCircuitReplicaCreator {
               "giving up on BlockReaderLocal.", this, pathInfo);
       return null;
     }
-    ShortCircuitCache cache = clientContext.getShortCircuitCache();
+    ShortCircuitCache cache =
+        clientContext.getShortCircuitCache(block.getBlockId());
     ExtendedBlockId key = new ExtendedBlockId(block.getBlockId(),
         block.getBlockPoolId());
     ShortCircuitReplicaInfo info = cache.fetchOrCreate(key, this);
@@ -525,7 +528,8 @@ public class BlockReaderFactory implements ShortCircuitReplicaCreator {
       if (curPeer.fromCache) remainingCacheTries--;
       DomainPeer peer = (DomainPeer)curPeer.peer;
       Slot slot = null;
-      ShortCircuitCache cache = clientContext.getShortCircuitCache();
+      ShortCircuitCache cache =
+          clientContext.getShortCircuitCache(block.getBlockId());
       try {
         MutableBoolean usedPeer = new MutableBoolean(false);
         slot = cache.allocShmSlot(datanode, peer, usedPeer,
@@ -580,9 +584,10 @@ public class BlockReaderFactory implements ShortCircuitReplicaCreator {
    */
   private ShortCircuitReplicaInfo requestFileDescriptors(DomainPeer peer,
           Slot slot) throws IOException {
-    ShortCircuitCache cache = clientContext.getShortCircuitCache();
+    ShortCircuitCache cache =
+        clientContext.getShortCircuitCache(block.getBlockId());
     final DataOutputStream out =
-        new DataOutputStream(new BufferedOutputStream(peer.getOutputStream()));
+        new DataOutputStream(new BufferedOutputStream(peer.getOutputStream(), SMALL_BUFFER_SIZE));
     SlotId slotId = slot == null ? null : slot.getSlotId();
     new Sender(out).requestShortCircuitFds(block, token, slotId, 1,
         failureInjector.getSupportsReceiptVerification());
@@ -822,7 +827,7 @@ public class BlockReaderFactory implements ShortCircuitReplicaCreator {
           datanode);
       LOG.trace("nextTcpPeer: created newConnectedPeer {}", peer);
       return new BlockReaderPeer(peer, false);
-    } catch (IOException e) {
+    } catch (IOException | UnresolvedAddressException e) {
       LOG.trace("nextTcpPeer: failed to create newConnectedPeer connected to"
           + "{}", datanode);
       throw e;
@@ -854,7 +859,7 @@ public class BlockReaderFactory implements ShortCircuitReplicaCreator {
         fileName, block, token, startOffset, length,
         verifyChecksum, clientName, peer, datanode,
         clientContext.getPeerCache(), cachingStrategy,
-        networkDistance);
+        networkDistance, configuration);
   }
 
   @Override

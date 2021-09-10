@@ -17,13 +17,14 @@
  */
 package org.apache.hadoop.hdfs.server.namenode.ha;
 
-import com.google.common.base.Joiner;
+import org.apache.hadoop.thirdparty.com.google.common.base.Joiner;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.permission.FsAction;
@@ -34,6 +35,7 @@ import org.apache.hadoop.ipc.ObserverRetryOnActiveException;
 import org.apache.hadoop.ipc.RemoteException;
 import org.apache.hadoop.ipc.StandbyException;
 import org.apache.hadoop.security.UserGroupInformation;
+import org.apache.hadoop.tools.GetUserMappingsProtocol;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mockito;
@@ -42,9 +44,13 @@ import org.mockito.stubbing.Answer;
 
 import static org.apache.hadoop.ha.HAServiceProtocol.HAServiceState;
 
+import static org.apache.hadoop.hdfs.server.namenode.ha.ObserverReadProxyProvider.*;
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
 
 /**
  * Tests for {@link ObserverReadProxyProvider} under various configurations of
@@ -68,6 +74,11 @@ public class TestObserverReadProxyProvider {
     nnURI = URI.create("hdfs://" + ns);
     conf = new Configuration();
     conf.set(HdfsClientConfigKeys.DFS_NAMESERVICES, ns);
+    // Set observer probe retry period to 0. Required by the tests that
+    // transition observer back and forth
+    conf.setTimeDuration(
+        OBSERVER_PROBE_RETRY_PERIOD_KEY, 0, TimeUnit.MILLISECONDS);
+    conf.setBoolean(HdfsClientConfigKeys.Failover.RANDOM_ORDER, false);
   }
 
   private void setupProxyProvider(int namenodeCount) throws Exception {
@@ -113,6 +124,31 @@ public class TestObserverReadProxyProvider {
       }
     };
     proxyProvider.setObserverReadEnabled(true);
+  }
+
+  @Test
+  public void testWithNonClientProxy() throws Exception {
+    setupProxyProvider(2); // This will initialize all of the instance fields
+    final String fakeUser = "fakeUser";
+    final String[] fakeGroups = {"fakeGroup"};
+    HAProxyFactory<GetUserMappingsProtocol> proxyFactory =
+        new NameNodeHAProxyFactory<GetUserMappingsProtocol>() {
+          @Override
+          public GetUserMappingsProtocol createProxy(Configuration config,
+              InetSocketAddress addr, Class<GetUserMappingsProtocol> xface,
+              UserGroupInformation ugi, boolean withRetries,
+              AtomicBoolean fallbackToSimpleAuth) throws IOException {
+            GetUserMappingsProtocol proxy =
+                mock(GetUserMappingsProtocol.class);
+            when(proxy.getGroupsForUser(fakeUser)).thenReturn(fakeGroups);
+            return proxy;
+          }
+        };
+    ObserverReadProxyProvider<GetUserMappingsProtocol> userProxyProvider =
+        new ObserverReadProxyProvider<>(conf, nnURI,
+            GetUserMappingsProtocol.class, proxyFactory);
+    assertArrayEquals(fakeGroups,
+        userProxyProvider.getProxy().proxy.getGroupsForUser(fakeUser));
   }
 
   @Test

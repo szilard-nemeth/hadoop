@@ -21,15 +21,22 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.File;
 import java.io.FileDescriptor;
-import java.io.FileInputStream;
+import java.io.FileNotFoundException;
 import java.io.FilenameFilter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.RandomAccessFile;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.InvocationTargetException;
 import java.net.URI;
+import java.nio.ByteBuffer;
+import java.nio.channels.Channels;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.Arrays;
 
-import com.google.common.base.Preconditions;
+import com.fasterxml.jackson.databind.util.ByteBufferBackedInputStream;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hdfs.protocol.Block;
@@ -92,7 +99,8 @@ public class FsDatasetUtil {
     });
 
     if (matches == null || matches.length == 0) {
-      throw new IOException("Meta file not found, blockFile=" + blockFile);
+      throw new FileNotFoundException(
+          "Meta file not found, blockFile=" + blockFile);
     }
     if (matches.length > 1) {
       throw new IOException("Found more than one meta files: " 
@@ -111,8 +119,39 @@ public class FsDatasetUtil {
       }
       return raf.getFD();
     } catch(IOException ioe) {
-      IOUtils.cleanup(null, raf);
+      IOUtils.cleanupWithLogger(null, raf);
       throw ioe;
+    }
+  }
+
+  public static InputStream getInputStreamAndSeek(File file, long offset)
+      throws IOException {
+    RandomAccessFile raf = null;
+    try {
+      raf = new RandomAccessFile(file, "r");
+      raf.seek(offset);
+      return Channels.newInputStream(raf.getChannel());
+    } catch(IOException ioe) {
+      IOUtils.cleanupWithLogger(null, raf);
+      throw ioe;
+    }
+  }
+
+  public static InputStream getDirectInputStream(long addr, long length)
+      throws IOException {
+    try {
+      Class<?> directByteBufferClass =
+          Class.forName("java.nio.DirectByteBuffer");
+      Constructor<?> constructor =
+          directByteBufferClass.getDeclaredConstructor(long.class, int.class);
+      constructor.setAccessible(true);
+      ByteBuffer byteBuffer =
+          (ByteBuffer) constructor.newInstance(addr, (int)length);
+      return new ByteBufferBackedInputStream(byteBuffer);
+    } catch (ClassNotFoundException | NoSuchMethodException |
+        IllegalAccessException | InvocationTargetException |
+        InstantiationException e) {
+      throw new IOException(e);
     }
   }
 
@@ -177,10 +216,21 @@ public class FsDatasetUtil {
       @Override
       public InputStream getDataInputStream(long seekOffset)
           throws IOException {
-        return new FileInputStream(blockFile);
+        return Files.newInputStream(blockFile.toPath());
       }
     };
 
     FsDatasetImpl.computeChecksum(wrapper, dstMeta, smallBufferSize, conf);
+  }
+
+  public static void deleteMappedFile(String filePath) throws IOException {
+    if (filePath == null) {
+      throw new IOException("The filePath should not be null!");
+    }
+    boolean result = Files.deleteIfExists(Paths.get(filePath));
+    if (!result) {
+      throw new IOException(
+          "Failed to delete the mapped file: " + filePath);
+    }
   }
 }

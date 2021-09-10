@@ -18,8 +18,12 @@
 
 package org.apache.hadoop.fs.s3a.auth;
 
+import java.io.IOException;
 import java.nio.file.AccessDeniedException;
+import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import org.junit.Assume;
@@ -31,13 +35,14 @@ import org.apache.hadoop.classification.InterfaceStability;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.fs.s3a.auth.delegation.DelegationConstants;
 
 import static org.apache.hadoop.fs.contract.ContractTestUtils.touch;
 import static org.apache.hadoop.fs.s3a.Constants.*;
 import static org.apache.hadoop.fs.s3a.S3ATestUtils.disableFilesystemCaching;
+import static org.apache.hadoop.fs.s3a.S3ATestUtils.removeBaseAndBucketOverrides;
 import static org.apache.hadoop.fs.s3a.auth.RoleModel.*;
 import static org.apache.hadoop.fs.s3a.auth.RolePolicies.*;
+import static org.apache.hadoop.fs.s3a.auth.delegation.DelegationConstants.DELEGATION_TOKEN_BINDING;
 import static org.apache.hadoop.test.LambdaTestUtils.intercept;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
@@ -149,29 +154,49 @@ public final class RoleTestUtils {
       final Configuration srcConf,
       final String roleARN) {
     Configuration conf = new Configuration(srcConf);
+    removeBaseAndBucketOverrides(conf,
+        DELEGATION_TOKEN_BINDING,
+        ASSUMED_ROLE_ARN,
+        AWS_CREDENTIALS_PROVIDER);
     conf.set(AWS_CREDENTIALS_PROVIDER, AssumedRoleCredentialProvider.NAME);
     conf.set(ASSUMED_ROLE_ARN, roleARN);
     conf.set(ASSUMED_ROLE_SESSION_NAME, "test");
     conf.set(ASSUMED_ROLE_SESSION_DURATION, "15m");
-    conf.unset(DelegationConstants.DELEGATION_TOKEN_BINDING);
     disableFilesystemCaching(conf);
     return conf;
   }
 
   /**
    * Assert that an operation is forbidden.
+   * @param <T> type of closure
    * @param contained contained text, may be null
    * @param eval closure to evaluate
-   * @param <T> type of closure
    * @return the access denied exception
    * @throws Exception any other exception
    */
   public static <T> AccessDeniedException forbidden(
-      String contained,
-      Callable<T> eval)
+      final String contained,
+      final Callable<T> eval)
+      throws Exception {
+    return forbidden("", contained, eval);
+  }
+
+  /**
+   * Assert that an operation is forbidden.
+   * @param <T> type of closure
+   * @param message error message
+   * @param contained contained text, may be null
+   * @param eval closure to evaluate
+   * @return the access denied exception
+   * @throws Exception any other exception
+   */
+  public static <T> AccessDeniedException forbidden(
+      final String message,
+      final String contained,
+      final Callable<T> eval)
       throws Exception {
     return intercept(AccessDeniedException.class,
-        contained, eval);
+        contained, message, eval);
   }
 
   /**
@@ -208,5 +233,24 @@ public final class RoleTestUtils {
         expected.getSessionToken(),
         actual.getSessionToken());
 
+  }
+
+  /**
+   * Parallel-touch a set of files in the destination directory.
+   * @param fs filesystem
+   * @param destDir destination
+   * @param range range 1..range inclusive of files to create.
+   * @return the list of paths created.
+   */
+  public static List<Path> touchFiles(final FileSystem fs,
+      final Path destDir,
+      final int range) throws IOException {
+    List<Path> paths = IntStream.rangeClosed(1, range)
+        .mapToObj((i) -> new Path(destDir, "file-" + i))
+                .collect(Collectors.toList());
+    for (Path path : paths) {
+      touch(fs, path);
+    }
+    return paths;
   }
 }

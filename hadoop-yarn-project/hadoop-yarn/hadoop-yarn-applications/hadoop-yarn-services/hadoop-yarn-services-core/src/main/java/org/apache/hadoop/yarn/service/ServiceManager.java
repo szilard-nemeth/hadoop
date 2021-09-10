@@ -18,8 +18,8 @@
 
 package org.apache.hadoop.yarn.service;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
 import org.apache.hadoop.yarn.api.records.ContainerId;
 import org.apache.hadoop.yarn.event.AsyncDispatcher;
 import org.apache.hadoop.yarn.event.EventHandler;
@@ -117,8 +117,8 @@ public class ServiceManager implements EventHandler<ServiceEvent> {
 
   @Override
   public void handle(ServiceEvent event) {
+    writeLock.lock();
     try {
-      writeLock.lock();
       State oldState = getState();
       try {
         stateMachine.doTransition(event.getType(), event);

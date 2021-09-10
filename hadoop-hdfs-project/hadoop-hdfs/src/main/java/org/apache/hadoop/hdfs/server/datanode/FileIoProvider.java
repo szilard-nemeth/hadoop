@@ -279,7 +279,15 @@ public class FileIoProvider {
           waitTime, transferTime);
       profilingEventHook.afterFileIo(volume, TRANSFER, begin, count);
     } catch (Exception e) {
-      onFailure(volume, begin);
+      String em = e.getMessage();
+      if (em != null) {
+        if (!em.startsWith("Broken pipe")
+            && !em.startsWith("Connection reset")) {
+          onFailure(volume, begin);
+        }
+      } else {
+        onFailure(volume, begin);
+      }
       throw e;
     }
   }
@@ -328,7 +336,7 @@ public class FileIoProvider {
       profilingEventHook.afterMetadataOp(volume, OPEN, begin);
       return fis;
     } catch(Exception e) {
-      org.apache.commons.io.IOUtils.closeQuietly(fis);
+      IOUtils.closeStream(fis);
       onFailure(volume, begin);
       throw e;
     }
@@ -359,7 +367,7 @@ public class FileIoProvider {
       profilingEventHook.afterMetadataOp(volume, OPEN, begin);
       return fos;
     } catch(Exception e) {
-      org.apache.commons.io.IOUtils.closeQuietly(fos);
+      IOUtils.closeStream(fos);
       onFailure(volume, begin);
       throw e;
     }
@@ -424,7 +432,7 @@ public class FileIoProvider {
       profilingEventHook.afterMetadataOp(volume, OPEN, begin);
       return fis;
     } catch(Exception e) {
-      org.apache.commons.io.IOUtils.closeQuietly(fis);
+      IOUtils.closeStream(fis);
       onFailure(volume, begin);
       throw e;
     }
@@ -456,7 +464,7 @@ public class FileIoProvider {
       profilingEventHook.afterMetadataOp(volume, OPEN, begin);
       return fis;
     } catch(Exception e) {
-      org.apache.commons.io.IOUtils.closeQuietly(fis);
+      IOUtils.closeStream(fis);
       onFailure(volume, begin);
       throw e;
     }
@@ -487,7 +495,7 @@ public class FileIoProvider {
       profilingEventHook.afterMetadataOp(volume, OPEN, begin);
       return raf;
     } catch(Exception e) {
-      org.apache.commons.io.IOUtils.closeQuietly(raf);
+      IOUtils.closeStream(raf);
       onFailure(volume, begin);
       throw e;
     }

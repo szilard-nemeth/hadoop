@@ -24,8 +24,8 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.hadoop.classification.InterfaceAudience.Private;
 import org.apache.hadoop.classification.InterfaceStability.Unstable;
 import org.apache.hadoop.conf.Configuration;
@@ -62,7 +62,7 @@ import org.apache.hadoop.yarn.server.timelineservice.collector.TimelineCollector
 import org.apache.hadoop.yarn.util.TimelineServiceHelper;
 import org.apache.hadoop.yarn.util.timeline.TimelineUtils;
 
-import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
 
 /**
  * This class is responsible for posting application, appattempt &amp; Container
@@ -71,8 +71,8 @@ import com.google.common.annotations.VisibleForTesting;
 @Private
 @Unstable
 public class TimelineServiceV2Publisher extends AbstractSystemMetricsPublisher {
-  private static final Log LOG =
-      LogFactory.getLog(TimelineServiceV2Publisher.class);
+  private static final Logger LOG =
+      LoggerFactory.getLogger(TimelineServiceV2Publisher.class);
   private RMTimelineCollectorManager rmTimelineCollectorManager;
   private boolean publishContainerEvents;
 
@@ -127,7 +127,7 @@ public class TimelineServiceV2Publisher extends AbstractSystemMetricsPublisher {
         ApplicationMetricsConstants.APP_NODE_LABEL_EXPRESSION,
         app.getAppNodeLabelExpression());
     if (app.getCallerContext() != null) {
-      if (app.getCallerContext().getContext() != null) {
+      if (app.getCallerContext().isContextValid()) {
         entityInfo.put(ApplicationMetricsConstants.YARN_APP_CALLER_CONTEXT,
             app.getCallerContext().getContext());
       }
@@ -458,6 +458,8 @@ public class TimelineServiceV2Publisher extends AbstractSystemMetricsPublisher {
       ContainerId containerId) {
     ContainerEntity entity = new ContainerEntity();
     entity.setId(containerId.toString());
+    entity.setIdPrefix(TimelineServiceHelper.invertLong(
+        containerId.getContainerId()));
     entity.setParent(new Identifier(TimelineEntityType.YARN_APPLICATION_ATTEMPT
         .name(), containerId.getApplicationAttemptId().toString()));
     return entity;
@@ -471,15 +473,20 @@ public class TimelineServiceV2Publisher extends AbstractSystemMetricsPublisher {
       }
       TimelineCollector timelineCollector =
           rmTimelineCollectorManager.get(appId);
-      TimelineEntities entities = new TimelineEntities();
-      entities.addEntity(entity);
-      timelineCollector.putEntities(entities,
-          UserGroupInformation.getCurrentUser());
+      if (timelineCollector != null) {
+        TimelineEntities entities = new TimelineEntities();
+        entities.addEntity(entity);
+        timelineCollector.putEntities(entities,
+                UserGroupInformation.getCurrentUser());
+      } else {
+        LOG.debug("Cannot find active collector while publishing entity "
+            + entity);
+      }
     } catch (IOException e) {
       LOG.error("Error when publishing entity " + entity);
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("Error when publishing entity " + entity, e);
-      }
+      LOG.debug("Error when publishing entity {}", entity, e);
+    } catch (Exception e) {
+      LOG.error("Unexpected error when publishing entity {}", entity, e);
     }
   }
 

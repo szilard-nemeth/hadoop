@@ -18,7 +18,7 @@
 
 package org.apache.hadoop.security;
 
-import com.google.protobuf.ByteString;
+import org.apache.hadoop.thirdparty.protobuf.ByteString;
 
 import java.io.BufferedInputStream;
 import java.io.DataInput;
@@ -26,9 +26,9 @@ import java.io.DataInputStream;
 import java.io.DataOutput;
 import java.io.DataOutputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -46,6 +46,7 @@ import org.apache.hadoop.io.IOUtils;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.io.Writable;
 import org.apache.hadoop.io.WritableUtils;
+import org.apache.hadoop.ipc.ProtobufHelper;
 import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.security.token.TokenIdentifier;
 import org.apache.hadoop.security.proto.SecurityProtos.CredentialsKVProto;
@@ -243,7 +244,7 @@ public class Credentials implements Writable {
     Credentials credentials = new Credentials();
     try {
       in = new DataInputStream(new BufferedInputStream(
-          new FileInputStream(filename)));
+          Files.newInputStream(filename.toPath())));
       credentials.readTokenStorageStream(in);
       return credentials;
     } catch(IOException ioe) {
@@ -368,7 +369,7 @@ public class Credentials implements Writable {
       CredentialsKVProto.Builder kv = CredentialsKVProto.newBuilder().
           setAliasBytes(ByteString.copyFrom(
               e.getKey().getBytes(), 0, e.getKey().getLength())).
-          setToken(e.getValue().toTokenProto());
+          setToken(ProtobufHelper.protoFromToken(e.getValue()));
       storage.addTokens(kv.build());
     }
 
@@ -390,7 +391,7 @@ public class Credentials implements Writable {
     CredentialsProto storage = CredentialsProto.parseDelimitedFrom((DataInputStream)in);
     for (CredentialsKVProto kv : storage.getTokensList()) {
       addToken(new Text(kv.getAliasBytes().toByteArray()),
-               (Token<? extends TokenIdentifier>) new Token(kv.getToken()));
+               ProtobufHelper.tokenFromProto(kv.getToken()));
     }
     for (CredentialsKVProto kv : storage.getSecretsList()) {
       addSecretKey(new Text(kv.getAliasBytes().toByteArray()),

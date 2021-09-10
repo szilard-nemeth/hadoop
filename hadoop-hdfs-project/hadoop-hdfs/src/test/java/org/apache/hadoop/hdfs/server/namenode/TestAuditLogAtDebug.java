@@ -18,18 +18,18 @@
 
 package org.apache.hadoop.hdfs.server.namenode;
 
-import com.google.common.base.Joiner;
+import org.apache.hadoop.thirdparty.com.google.common.base.Joiner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hdfs.DFSConfigKeys;
 import org.apache.hadoop.hdfs.HdfsConfiguration;
-import org.apache.hadoop.hdfs.server.namenode.FSNamesystem.DefaultAuditLogger;
+import org.apache.hadoop.hdfs.server.namenode.FSNamesystem.FSNamesystemAuditLogger;
 import org.apache.hadoop.test.GenericTestUtils;
-import org.apache.log4j.Level;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.Timeout;
+import org.slf4j.event.Level;
 
 import java.net.Inet4Address;
 import java.util.Arrays;
@@ -54,7 +54,7 @@ public class TestAuditLogAtDebug {
   
   private DefaultAuditLogger makeSpyLogger(
       Level level, Optional<List<String>> debugCommands) {
-    DefaultAuditLogger logger = new DefaultAuditLogger();
+    DefaultAuditLogger logger = new FSNamesystemAuditLogger();
     Configuration conf = new HdfsConfiguration();
     if (debugCommands.isPresent()) {
       conf.set(DFSConfigKeys.DFS_NAMENODE_AUDIT_LOG_DEBUG_CMDLIST,

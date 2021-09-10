@@ -21,8 +21,8 @@ import java.io.Serializable;
 import java.util.Collection;
 import java.util.Comparator;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.hadoop.classification.InterfaceAudience.Private;
 import org.apache.hadoop.classification.InterfaceStability.Unstable;
 import org.apache.hadoop.yarn.api.records.Resource;
@@ -34,7 +34,7 @@ import org.apache.hadoop.yarn.util.resource.DefaultResourceCalculator;
 import org.apache.hadoop.yarn.util.resource.ResourceCalculator;
 import org.apache.hadoop.yarn.util.resource.Resources;
 
-import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
 
 /**
  * Makes scheduling decisions by trying to equalize shares of memory.
@@ -44,7 +44,8 @@ import com.google.common.annotations.VisibleForTesting;
 public class FairSharePolicy extends SchedulingPolicy {
   @VisibleForTesting
   public static final String NAME = "fair";
-  private static final Log LOG = LogFactory.getLog(FairSharePolicy.class);
+  private static final Logger LOG =
+      LoggerFactory.getLogger(FairSharePolicy.class);
   private static final String MEMORY = ResourceInformation.MEMORY_MB.getName();
   private static final DefaultResourceCalculator RESOURCE_CALCULATOR =
       new DefaultResourceCalculator();

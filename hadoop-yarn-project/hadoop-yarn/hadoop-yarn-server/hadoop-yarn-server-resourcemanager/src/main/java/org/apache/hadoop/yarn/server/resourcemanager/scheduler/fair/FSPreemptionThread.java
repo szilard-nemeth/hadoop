@@ -17,8 +17,8 @@
  */
 package org.apache.hadoop.yarn.server.resourcemanager.scheduler.fair;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.hadoop.yarn.api.records.ApplicationId;
 import org.apache.hadoop.yarn.api.records.ContainerStatus;
 import org.apache.hadoop.yarn.api.records.Resource;
@@ -40,7 +40,8 @@ import java.util.concurrent.locks.Lock;
  * Thread that handles FairScheduler preemption.
  */
 class FSPreemptionThread extends Thread {
-  private static final Log LOG = LogFactory.getLog(FSPreemptionThread.class);
+  private static final Logger LOG = LoggerFactory.
+      getLogger(FSPreemptionThread.class);
   protected final FSContext context;
   private final FairScheduler scheduler;
   private final long warnTimeBeforeKill;
@@ -124,9 +125,13 @@ class FSPreemptionThread extends Thread {
             for (RMContainer container : containers) {
               FSAppAttempt app = scheduler.getSchedulerApp(
                       container.getApplicationAttemptId());
-              LOG.info("Preempting container " + container +
-                      " from queue " + app.getQueueName());
-              app.trackContainerForPreemption(container);
+              LOG.info("Preempting container " + container + " from queue: "
+                  + (app != null ? app.getQueueName() : "unknown"));
+              // If the app has unregistered while building the container list
+              // the app might be null, skip notifying the app
+              if (app != null) {
+                app.trackContainerForPreemption(container);
+              }
             }
           }
         }
@@ -188,6 +193,13 @@ class FSPreemptionThread extends Thread {
     for (RMContainer container : containersToCheck) {
       FSAppAttempt app =
           scheduler.getSchedulerApp(container.getApplicationAttemptId());
+      // If the app has unregistered while building the container list the app
+      // might be null, just skip this container: it should be cleaned up soon
+      if (app == null) {
+        LOG.info("Found container " + container + " on node "
+            + node.getNodeName() + "without app, skipping preemption");
+        continue;
+      }
       ApplicationId appId = app.getApplicationId();
 
       if (app.canContainerBePreempted(container,

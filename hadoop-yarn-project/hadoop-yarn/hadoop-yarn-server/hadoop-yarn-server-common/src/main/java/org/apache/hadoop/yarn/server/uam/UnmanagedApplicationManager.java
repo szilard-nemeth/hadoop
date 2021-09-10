@@ -68,8 +68,8 @@ import org.apache.hadoop.yarn.util.ConverterUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
 
 /**
  * UnmanagedApplicationManager is used to register unmanaged application and
@@ -225,12 +225,12 @@ public class UnmanagedApplicationManager {
     this.heartbeatHandler.resetLastResponseId();
 
     for (Container container : response.getContainersFromPreviousAttempts()) {
-      LOG.debug("RegisterUAM returned existing running container "
-          + container.getId());
+      LOG.debug("RegisterUAM returned existing running container {}",
+          container.getId());
     }
     for (NMToken nmToken : response.getNMTokensFromPreviousAttempts()) {
-      LOG.debug("RegisterUAM returned existing NM token for node "
-          + nmToken.getNodeId());
+      LOG.debug("RegisterUAM returned existing NM token for node {}",
+          nmToken.getNodeId());
     }
     LOG.info(
         "RegisterUAM returned {} existing running container and {} NM tokens",

@@ -32,6 +32,7 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.azure.integration.AzureTestConstants;
 import org.apache.hadoop.fs.azure.metrics.AzureFileSystemInstrumentation;
 import org.apache.hadoop.fs.azure.metrics.AzureFileSystemMetricsSystem;
+import org.apache.hadoop.fs.azure.integration.AzureTestUtils;
 import org.apache.hadoop.metrics2.AbstractMetric;
 import org.apache.hadoop.metrics2.MetricsRecord;
 import org.apache.hadoop.metrics2.MetricsSink;
@@ -64,7 +65,7 @@ public final class AzureBlobStorageTestAccount implements AutoCloseable,
   public static final String ACCOUNT_KEY_PROPERTY_NAME = "fs.azure.account.key.";
   public static final String TEST_ACCOUNT_NAME_PROPERTY_NAME = "fs.azure.account.name";
   public static final String WASB_TEST_ACCOUNT_NAME_WITH_DOMAIN = "fs.azure.wasb.account.name";
-  public static final String MOCK_ACCOUNT_NAME = "mockAccount.blob.core.windows.net";
+  public static final String MOCK_ACCOUNT_NAME = "mockAccount-c01112a3-2a23-433e-af2a-e808ea385136.blob.core.windows.net";
   public static final String WASB_ACCOUNT_NAME_DOMAIN_SUFFIX = ".blob.core.windows.net";
   public static final String WASB_ACCOUNT_NAME_DOMAIN_SUFFIX_REGEX = "\\.blob(\\.preprod)?\\.core\\.windows\\.net";
   public static final String MOCK_CONTAINER_NAME = "mockContainer";
@@ -529,6 +530,8 @@ public final class AzureBlobStorageTestAccount implements AutoCloseable,
 
   static CloudStorageAccount createTestAccount(Configuration conf)
       throws URISyntaxException, KeyProviderException {
+    AzureTestUtils.assumeNamespaceDisabled(conf);
+
     String testAccountName = verifyWasbAccountNameInConfig(conf);
     if (testAccountName == null) {
       LOG.warn("Skipping live Azure test because of missing test account");
@@ -594,7 +597,10 @@ public final class AzureBlobStorageTestAccount implements AutoCloseable,
       }
       // Remove the account key from the configuration to make sure we don't
       // cheat and use that.
-      conf.set(ACCOUNT_KEY_PROPERTY_NAME + accountName, "");
+      // but only if not in secure mode, which requires that login
+      if (!conf.getBoolean(AzureNativeFileSystemStore.KEY_USE_SECURE_MODE, false)) {
+        conf.set(ACCOUNT_KEY_PROPERTY_NAME + accountName, "");
+      }
       // Set the SAS key.
       conf.set(SAS_PROPERTY_NAME + containerName + "." + accountName, sas);
     }

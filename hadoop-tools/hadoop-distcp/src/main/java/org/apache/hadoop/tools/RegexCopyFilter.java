@@ -25,17 +25,17 @@ import org.apache.hadoop.io.IOUtils;
 
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.Charset;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Pattern;
 
-import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
 
 /**
  * A CopyFilter which compares Java Regex Patterns to each Path to determine
@@ -63,7 +63,7 @@ public class RegexCopyFilter extends CopyFilter {
   public void initialize() {
     BufferedReader reader = null;
     try {
-      InputStream is = new FileInputStream(filtersFile);
+      InputStream is = Files.newInputStream(filtersFile.toPath());
       reader = new BufferedReader(new InputStreamReader(is,
           Charset.forName("UTF-8")));
       String line;

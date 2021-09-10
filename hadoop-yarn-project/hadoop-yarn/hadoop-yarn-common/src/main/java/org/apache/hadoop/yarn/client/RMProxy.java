@@ -24,14 +24,15 @@ import java.net.ConnectException;
 import java.net.InetSocketAddress;
 import java.net.NoRouteToHostException;
 import java.net.SocketException;
+import java.net.SocketTimeoutException;
 import java.net.UnknownHostException;
 import java.security.PrivilegedAction;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceAudience.Private;
 import org.apache.hadoop.classification.InterfaceStability;
@@ -49,14 +50,14 @@ import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.apache.hadoop.yarn.exceptions.YarnRuntimeException;
 import org.apache.hadoop.yarn.ipc.YarnRPC;
 
-import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
 
 @InterfaceAudience.Public
 @InterfaceStability.Evolving
 @SuppressWarnings("unchecked")
 public class RMProxy<T> {
 
-  private static final Log LOG = LogFactory.getLog(RMProxy.class);
+  private static final Logger LOG = LoggerFactory.getLogger(RMProxy.class);
   private UserGroupInformation user;
 
   protected RMProxy() {
@@ -124,16 +125,13 @@ public class RMProxy<T> {
   private static <T> T newProxyInstance(final YarnConfiguration conf,
       final Class<T> protocol, RMProxy<T> instance, RetryPolicy retryPolicy)
           throws IOException{
+    RMFailoverProxyProvider<T> provider;
     if (HAUtil.isHAEnabled(conf) || HAUtil.isFederationEnabled(conf)) {
-      RMFailoverProxyProvider<T> provider =
-          instance.createRMFailoverProxyProvider(conf, protocol);
-      return (T) RetryProxy.create(protocol, provider, retryPolicy);
+      provider = instance.createRMFailoverProxyProvider(conf, protocol);
     } else {
-      InetSocketAddress rmAddress = instance.getRMAddress(conf, protocol);
-      LOG.info("Connecting to ResourceManager at " + rmAddress);
-      T proxy = instance.getProxy(conf, protocol, rmAddress);
-      return (T) RetryProxy.create(protocol, proxy, retryPolicy);
+      provider = instance.createNonHaRMFailoverProxyProvider(conf, protocol);
     }
+    return (T) RetryProxy.create(protocol, provider, retryPolicy);
   }
 
   /**
@@ -151,6 +149,28 @@ public class RMProxy<T> {
           return (T) YarnRPC.create(conf).getProxy(protocol, rmAddress, conf);
         }
       });
+  }
+
+  /**
+   * Helper method to create non-HA RMFailoverProxyProvider.
+   */
+  private <T> RMFailoverProxyProvider<T> createNonHaRMFailoverProxyProvider(
+      Configuration conf, Class<T> protocol) {
+    Class<? extends RMFailoverProxyProvider<T>> defaultProviderClass;
+    try {
+      defaultProviderClass = (Class<? extends RMFailoverProxyProvider<T>>)
+          Class.forName(
+              YarnConfiguration.DEFAULT_CLIENT_FAILOVER_NO_HA_PROXY_PROVIDER);
+    } catch (Exception e) {
+      throw new YarnRuntimeException("Invalid default failover provider class" +
+          YarnConfiguration.DEFAULT_CLIENT_FAILOVER_NO_HA_PROXY_PROVIDER, e);
+    }
+
+    RMFailoverProxyProvider<T> provider = ReflectionUtils.newInstance(
+        conf.getClass(YarnConfiguration.CLIENT_FAILOVER_NO_HA_PROXY_PROVIDER,
+            defaultProviderClass, RMFailoverProxyProvider.class), conf);
+    provider.init(conf, (RMProxy<T>) this, protocol);
+    return provider;
   }
 
   /**
@@ -275,6 +295,7 @@ public class RMProxy<T> {
     exceptionToPolicyMap.put(ConnectTimeoutException.class, retryPolicy);
     exceptionToPolicyMap.put(RetriableException.class, retryPolicy);
     exceptionToPolicyMap.put(SocketException.class, retryPolicy);
+    exceptionToPolicyMap.put(SocketTimeoutException.class, retryPolicy);
     exceptionToPolicyMap.put(StandbyException.class, retryPolicy);
     // YARN-4288: local IOException is also possible.
     exceptionToPolicyMap.put(IOException.class, retryPolicy);

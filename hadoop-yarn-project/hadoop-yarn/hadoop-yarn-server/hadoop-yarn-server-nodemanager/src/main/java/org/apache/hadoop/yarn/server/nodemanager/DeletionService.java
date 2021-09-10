@@ -46,7 +46,7 @@ import org.apache.hadoop.yarn.server.nodemanager.containermanager.deletion.task.
 import org.apache.hadoop.yarn.server.nodemanager.recovery.NMNullStateStoreService;
 import org.apache.hadoop.yarn.server.nodemanager.recovery.NMStateStoreService;
 
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import org.apache.hadoop.thirdparty.com.google.common.util.concurrent.ThreadFactoryBuilder;
 
 public class DeletionService extends AbstractService {
 
@@ -85,11 +85,8 @@ public class DeletionService extends AbstractService {
 
   public void delete(DeletionTask deletionTask) {
     if (debugDelay != -1) {
-      if (LOG.isDebugEnabled()) {
-        String msg = String.format("Scheduling DeletionTask (delay %d) : %s",
-            debugDelay, deletionTask.toString());
-        LOG.debug(msg);
-      }
+      LOG.debug("Scheduling DeletionTask (delay {}) : {}", debugDelay,
+          deletionTask);
       recordDeletionTaskInStateStore(deletionTask);
       sched.schedule(deletionTask, debugDelay, TimeUnit.SECONDS);
     }

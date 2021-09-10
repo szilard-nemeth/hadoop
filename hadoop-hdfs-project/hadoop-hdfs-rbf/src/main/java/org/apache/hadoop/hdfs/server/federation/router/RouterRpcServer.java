@@ -17,6 +17,7 @@
  */
 package org.apache.hadoop.hdfs.server.federation.router;
 
+import static org.apache.hadoop.fs.CommonConfigurationKeysPublic.HADOOP_SECURITY_AUTHORIZATION;
 import static org.apache.hadoop.hdfs.server.federation.router.RBFConfigKeys.DFS_ROUTER_HANDLER_COUNT_DEFAULT;
 import static org.apache.hadoop.hdfs.server.federation.router.RBFConfigKeys.DFS_ROUTER_HANDLER_COUNT_KEY;
 import static org.apache.hadoop.hdfs.server.federation.router.RBFConfigKeys.DFS_ROUTER_HANDLER_QUEUE_SIZE_DEFAULT;
@@ -25,21 +26,45 @@ import static org.apache.hadoop.hdfs.server.federation.router.RBFConfigKeys.DFS_
 import static org.apache.hadoop.hdfs.server.federation.router.RBFConfigKeys.DFS_ROUTER_READER_COUNT_KEY;
 import static org.apache.hadoop.hdfs.server.federation.router.RBFConfigKeys.DFS_ROUTER_READER_QUEUE_SIZE_DEFAULT;
 import static org.apache.hadoop.hdfs.server.federation.router.RBFConfigKeys.DFS_ROUTER_READER_QUEUE_SIZE_KEY;
+import static org.apache.hadoop.hdfs.server.federation.router.RBFConfigKeys.DN_REPORT_CACHE_EXPIRE;
+import static org.apache.hadoop.hdfs.server.federation.router.RBFConfigKeys.DN_REPORT_CACHE_EXPIRE_MS_DEFAULT;
+import static org.apache.hadoop.hdfs.server.federation.router.RBFConfigKeys.DFS_ROUTER_FEDERATION_RENAME_OPTION;
+import static org.apache.hadoop.hdfs.server.federation.router.RBFConfigKeys.DFS_ROUTER_FEDERATION_RENAME_OPTION_DEFAULT;
+import static org.apache.hadoop.hdfs.server.federation.router.RouterFederationRename.RouterRenameOption;
+import static org.apache.hadoop.tools.fedbalance.FedBalanceConfigs.SCHEDULER_JOURNAL_URI;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.lang.reflect.Array;
+import java.net.ConnectException;
 import java.net.InetSocketAddress;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.Set;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hdfs.HAUtil;
+import org.apache.hadoop.thirdparty.com.google.common.cache.CacheBuilder;
+import org.apache.hadoop.thirdparty.com.google.common.cache.CacheLoader;
+import org.apache.hadoop.thirdparty.com.google.common.cache.LoadingCache;
+import org.apache.hadoop.thirdparty.com.google.common.util.concurrent.ListenableFuture;
+import org.apache.hadoop.thirdparty.com.google.common.util.concurrent.ListeningExecutorService;
+import org.apache.hadoop.thirdparty.com.google.common.util.concurrent.MoreExecutors;
+import org.apache.hadoop.thirdparty.com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.crypto.CryptoProtocolVersion;
 import org.apache.hadoop.fs.BatchedRemoteIterator.BatchedEntries;
@@ -63,6 +88,7 @@ import org.apache.hadoop.hdfs.AddBlockFlag;
 import org.apache.hadoop.hdfs.DFSUtil;
 import org.apache.hadoop.hdfs.inotify.EventBatchList;
 import org.apache.hadoop.hdfs.protocol.AddErasureCodingPolicyResponse;
+import org.apache.hadoop.hdfs.protocol.BatchedDirectoryListing;
 import org.apache.hadoop.hdfs.protocol.BlockStoragePolicy;
 import org.apache.hadoop.hdfs.protocol.CacheDirectiveEntry;
 import org.apache.hadoop.hdfs.protocol.CacheDirectiveInfo;
@@ -74,6 +100,7 @@ import org.apache.hadoop.hdfs.protocol.DatanodeID;
 import org.apache.hadoop.hdfs.protocol.DatanodeInfo;
 import org.apache.hadoop.hdfs.protocol.DirectoryListing;
 import org.apache.hadoop.hdfs.protocol.ECBlockGroupStats;
+import org.apache.hadoop.hdfs.protocol.ECTopologyVerifierResult;
 import org.apache.hadoop.hdfs.protocol.EncryptionZone;
 import org.apache.hadoop.hdfs.protocol.ErasureCodingPolicy;
 import org.apache.hadoop.hdfs.protocol.ErasureCodingPolicyInfo;
@@ -94,6 +121,7 @@ import org.apache.hadoop.hdfs.protocol.RollingUpgradeInfo;
 import org.apache.hadoop.hdfs.protocol.SnapshotDiffReport;
 import org.apache.hadoop.hdfs.protocol.SnapshotDiffReportListing;
 import org.apache.hadoop.hdfs.protocol.SnapshottableDirectoryStatus;
+import org.apache.hadoop.hdfs.protocol.SnapshotStatus;
 import org.apache.hadoop.hdfs.protocol.ZoneReencryptionStatus;
 import org.apache.hadoop.hdfs.protocol.proto.NamenodeProtocolProtos.NamenodeProtocolService;
 import org.apache.hadoop.hdfs.protocol.proto.ClientNamenodeProtocolProtos.ClientNamenodeProtocol;
@@ -101,6 +129,7 @@ import org.apache.hadoop.hdfs.protocolPB.ClientNamenodeProtocolPB;
 import org.apache.hadoop.hdfs.protocolPB.ClientNamenodeProtocolServerSideTranslatorPB;
 import org.apache.hadoop.hdfs.protocolPB.NamenodeProtocolPB;
 import org.apache.hadoop.hdfs.protocolPB.NamenodeProtocolServerSideTranslatorPB;
+import org.apache.hadoop.hdfs.protocolPB.RouterPolicyProvider;
 import org.apache.hadoop.hdfs.security.token.block.DataEncryptionKey;
 import org.apache.hadoop.hdfs.security.token.block.ExportedBlockKeys;
 import org.apache.hadoop.hdfs.security.token.delegation.DelegationTokenIdentifier;
@@ -111,7 +140,9 @@ import org.apache.hadoop.hdfs.server.federation.resolver.FileSubclusterResolver;
 import org.apache.hadoop.hdfs.server.federation.resolver.MountTableResolver;
 import org.apache.hadoop.hdfs.server.federation.resolver.PathLocation;
 import org.apache.hadoop.hdfs.server.federation.resolver.RemoteLocation;
+import org.apache.hadoop.hdfs.server.federation.store.StateStoreUnavailableException;
 import org.apache.hadoop.hdfs.server.federation.store.records.MountTable;
+import org.apache.hadoop.hdfs.server.federation.router.security.RouterSecurityManager;
 import org.apache.hadoop.hdfs.server.namenode.CheckpointSignature;
 import org.apache.hadoop.hdfs.server.namenode.LeaseExpiredException;
 import org.apache.hadoop.hdfs.server.namenode.NameNode.OperationCategory;
@@ -126,22 +157,32 @@ import org.apache.hadoop.hdfs.server.protocol.NamespaceInfo;
 import org.apache.hadoop.hdfs.server.protocol.RemoteEditLogManifest;
 import org.apache.hadoop.io.EnumSetWritable;
 import org.apache.hadoop.io.Text;
-import org.apache.hadoop.ipc.ProtobufRpcEngine;
+import org.apache.hadoop.ipc.ProtobufRpcEngine2;
 import org.apache.hadoop.ipc.RPC;
 import org.apache.hadoop.ipc.RPC.Server;
 import org.apache.hadoop.ipc.RemoteException;
+import org.apache.hadoop.ipc.RetriableException;
 import org.apache.hadoop.ipc.StandbyException;
 import org.apache.hadoop.net.NodeBase;
 import org.apache.hadoop.security.AccessControlException;
+import org.apache.hadoop.security.RefreshUserMappingsProtocol;
 import org.apache.hadoop.security.UserGroupInformation;
+import org.apache.hadoop.security.proto.RefreshUserMappingsProtocolProtos;
+import org.apache.hadoop.security.protocolPB.RefreshUserMappingsProtocolPB;
+import org.apache.hadoop.security.protocolPB.RefreshUserMappingsProtocolServerSideTranslatorPB;
 import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.service.AbstractService;
+import org.apache.hadoop.tools.GetUserMappingsProtocol;
+import org.apache.hadoop.tools.fedbalance.procedure.BalanceProcedureScheduler;
+import org.apache.hadoop.tools.proto.GetUserMappingsProtocolProtos;
+import org.apache.hadoop.tools.protocolPB.GetUserMappingsProtocolPB;
+import org.apache.hadoop.tools.protocolPB.GetUserMappingsProtocolServerSideTranslatorPB;
 import org.apache.hadoop.util.ReflectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.protobuf.BlockingService;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.protobuf.BlockingService;
 
 /**
  * This class is responsible for handling all of the RPC calls to the It is
@@ -151,8 +192,8 @@ import com.google.protobuf.BlockingService;
  * the requests to the active
  * {@link org.apache.hadoop.hdfs.server.namenode.NameNode NameNode}.
  */
-public class RouterRpcServer extends AbstractService
-    implements ClientProtocol, NamenodeProtocol {
+public class RouterRpcServer extends AbstractService implements ClientProtocol,
+    NamenodeProtocol, RefreshUserMappingsProtocol, GetUserMappingsProtocol {
 
   private static final Logger LOG =
       LoggerFactory.getLogger(RouterRpcServer.class);
@@ -175,6 +216,9 @@ public class RouterRpcServer extends AbstractService
   /** Monitor metrics for the RPC calls. */
   private final RouterRpcMonitor rpcMonitor;
 
+  /** If we use authentication for the connections. */
+  private final boolean serviceAuthEnabled;
+
 
   /** Interface to identify the active NN for a nameservice or blockpool ID. */
   private final ActiveNamenodeResolver namenodeResolver;
@@ -192,7 +236,21 @@ public class RouterRpcServer extends AbstractService
   private final RouterNamenodeProtocol nnProto;
   /** ClientProtocol calls. */
   private final RouterClientProtocol clientProto;
+  /** Other protocol calls. */
+  private final RouterUserProtocol routerProto;
+  /** Router security manager to handle token operations. */
+  private RouterSecurityManager securityManager = null;
+  /** Super user credentials that a thread may use. */
+  private static final ThreadLocal<UserGroupInformation> CUR_USER =
+      new ThreadLocal<>();
 
+  /** DN type -> full DN report. */
+  private final LoadingCache<DatanodeReportType, DatanodeInfo[]> dnCache;
+
+  /** Specify the option of router federation rename. */
+  private RouterRenameOption routerRenameOption;
+  /** Schedule the router federation rename jobs. */
+  private BalanceProcedureScheduler fedRenameScheduler;
   /**
    * Construct a router RPC server.
    *
@@ -230,7 +288,7 @@ public class RouterRpcServer extends AbstractService
         readerQueueSize);
 
     RPC.setProtocolEngine(this.conf, ClientNamenodeProtocolPB.class,
-        ProtobufRpcEngine.class);
+        ProtobufRpcEngine2.class);
 
     ClientNamenodeProtocolServerSideTranslatorPB
         clientProtocolServerTranslator =
@@ -243,6 +301,18 @@ public class RouterRpcServer extends AbstractService
     BlockingService nnPbService = NamenodeProtocolService
         .newReflectiveBlockingService(namenodeProtocolXlator);
 
+    RefreshUserMappingsProtocolServerSideTranslatorPB refreshUserMappingXlator =
+        new RefreshUserMappingsProtocolServerSideTranslatorPB(this);
+    BlockingService refreshUserMappingService =
+        RefreshUserMappingsProtocolProtos.RefreshUserMappingsProtocolService.
+        newReflectiveBlockingService(refreshUserMappingXlator);
+
+    GetUserMappingsProtocolServerSideTranslatorPB getUserMappingXlator =
+        new GetUserMappingsProtocolServerSideTranslatorPB(this);
+    BlockingService getUserMappingService =
+        GetUserMappingsProtocolProtos.GetUserMappingsProtocolService.
+        newReflectiveBlockingService(getUserMappingXlator);
+
     InetSocketAddress confRpcAddress = conf.getSocketAddr(
         RBFConfigKeys.DFS_ROUTER_RPC_BIND_HOST_KEY,
         RBFConfigKeys.DFS_ROUTER_RPC_ADDRESS_KEY,
@@ -250,6 +320,9 @@ public class RouterRpcServer extends AbstractService
         RBFConfigKeys.DFS_ROUTER_RPC_PORT_DEFAULT);
     LOG.info("RPC server binding to {} with {} handlers for Router {}",
         confRpcAddress, handlerCount, this.router.getRouterId());
+
+    // Create security manager
+    this.securityManager = new RouterSecurityManager(this.conf);
 
     this.rpcServer = new RPC.Builder(this.conf)
         .setProtocol(ClientNamenodeProtocolPB.class)
@@ -260,11 +333,23 @@ public class RouterRpcServer extends AbstractService
         .setnumReaders(readerCount)
         .setQueueSizePerHandler(handlerQueueSize)
         .setVerbose(false)
+        .setSecretManager(this.securityManager.getSecretManager())
         .build();
 
     // Add all the RPC protocols that the Router implements
     DFSUtil.addPBProtocol(
         conf, NamenodeProtocolPB.class, nnPbService, this.rpcServer);
+    DFSUtil.addPBProtocol(conf, RefreshUserMappingsProtocolPB.class,
+        refreshUserMappingService, this.rpcServer);
+    DFSUtil.addPBProtocol(conf, GetUserMappingsProtocolPB.class,
+        getUserMappingService, this.rpcServer);
+
+    // Set service-level authorization security policy
+    this.serviceAuthEnabled = conf.getBoolean(
+        HADOOP_SECURITY_AUTHORIZATION, false);
+    if (this.serviceAuthEnabled) {
+      rpcServer.refreshServiceAcl(conf, new RouterPolicyProvider());
+    }
 
     // We don't want the server to log the full stack trace for some exceptions
     this.rpcServer.addTerseExceptions(
@@ -275,7 +360,9 @@ public class RouterRpcServer extends AbstractService
         AccessControlException.class,
         LeaseExpiredException.class,
         NotReplicatedYetException.class,
-        IOException.class);
+        IOException.class,
+        ConnectException.class,
+        RetriableException.class);
 
     this.rpcServer.addSuppressedLoggingExceptions(
         StandbyException.class);
@@ -285,12 +372,17 @@ public class RouterRpcServer extends AbstractService
     this.rpcAddress = new InetSocketAddress(
         confRpcAddress.getHostName(), listenAddress.getPort());
 
-    // Create metrics monitor
-    Class<? extends RouterRpcMonitor> rpcMonitorClass = this.conf.getClass(
-        RBFConfigKeys.DFS_ROUTER_METRICS_CLASS,
-        RBFConfigKeys.DFS_ROUTER_METRICS_CLASS_DEFAULT,
-        RouterRpcMonitor.class);
-    this.rpcMonitor = ReflectionUtils.newInstance(rpcMonitorClass, conf);
+    if (conf.getBoolean(RBFConfigKeys.DFS_ROUTER_METRICS_ENABLE,
+        RBFConfigKeys.DFS_ROUTER_METRICS_ENABLE_DEFAULT)) {
+      // Create metrics monitor
+      Class<? extends RouterRpcMonitor> rpcMonitorClass = this.conf.getClass(
+          RBFConfigKeys.DFS_ROUTER_METRICS_CLASS,
+          RBFConfigKeys.DFS_ROUTER_METRICS_CLASS_DEFAULT,
+          RouterRpcMonitor.class);
+      this.rpcMonitor = ReflectionUtils.newInstance(rpcMonitorClass, conf);
+    } else {
+      this.rpcMonitor = null;
+    }
 
     // Create the client
     this.rpcClient = new RouterRpcClient(this.conf, this.router,
@@ -300,6 +392,75 @@ public class RouterRpcServer extends AbstractService
     this.quotaCall = new Quota(this.router, this);
     this.nnProto = new RouterNamenodeProtocol(this);
     this.clientProto = new RouterClientProtocol(conf, this);
+    this.routerProto = new RouterUserProtocol(this);
+
+    long dnCacheExpire = conf.getTimeDuration(
+        DN_REPORT_CACHE_EXPIRE,
+        DN_REPORT_CACHE_EXPIRE_MS_DEFAULT, TimeUnit.MILLISECONDS);
+    this.dnCache = CacheBuilder.newBuilder()
+        .build(new DatanodeReportCacheLoader());
+
+    // Actively refresh the dn cache in a configured interval
+    Executors
+        .newSingleThreadScheduledExecutor()
+        .scheduleWithFixedDelay(() -> this.dnCache
+                .asMap()
+                .keySet()
+                .parallelStream()
+                .forEach((key) -> this.dnCache.refresh(key)),
+            0,
+            dnCacheExpire, TimeUnit.MILLISECONDS);
+    initRouterFedRename();
+  }
+
+  /**
+   * Init the router federation rename environment. Each router has its own
+   * journal path.
+   * In HA mode the journal path is:
+   *   JOURNAL_BASE/nsId/namenodeId
+   * e.g.
+   *   /journal/router-namespace/host0
+   * In non-ha mode the journal path is based on ip and port:
+   *   JOURNAL_BASE/host_port
+   * e.g.
+   *   /journal/0.0.0.0_8888
+   */
+  private void initRouterFedRename() throws IOException {
+    routerRenameOption = RouterRenameOption.valueOf(
+        conf.get(DFS_ROUTER_FEDERATION_RENAME_OPTION,
+            DFS_ROUTER_FEDERATION_RENAME_OPTION_DEFAULT).toUpperCase());
+    switch (routerRenameOption) {
+    case DISTCP:
+      RouterFederationRename.checkConfiguration(conf);
+      Configuration sConf = new Configuration(conf);
+      URI journalUri;
+      try {
+        journalUri = new URI(sConf.get(SCHEDULER_JOURNAL_URI));
+      } catch (URISyntaxException e) {
+        throw new IOException("Bad journal uri. Please check configuration for "
+            + SCHEDULER_JOURNAL_URI);
+      }
+      Path child;
+      String nsId = DFSUtil.getNamenodeNameServiceId(conf);
+      String namenodeId = HAUtil.getNameNodeId(conf, nsId);
+      InetSocketAddress listenAddress = this.rpcServer.getListenerAddress();
+      if (nsId == null || namenodeId == null) {
+        child = new Path(
+            listenAddress.getHostName() + "_" + listenAddress.getPort());
+      } else {
+        child = new Path(nsId, namenodeId);
+      }
+      String routerJournal = new Path(journalUri.toString(), child).toString();
+      sConf.set(SCHEDULER_JOURNAL_URI, routerJournal);
+      fedRenameScheduler = new BalanceProcedureScheduler(sConf);
+      fedRenameScheduler.init(true);
+      break;
+    case NONE:
+      fedRenameScheduler = null;
+      break;
+    default:
+      break;
+    }
   }
 
   @Override
@@ -307,7 +468,7 @@ public class RouterRpcServer extends AbstractService
     this.conf = configuration;
 
     if (this.rpcMonitor == null) {
-      LOG.error("Cannot instantiate Router RPC metrics class");
+      LOG.info("Do not start Router RPC metrics");
     } else {
       this.rpcMonitor.init(this.conf, this, this.router.getStateStore());
     }
@@ -332,7 +493,30 @@ public class RouterRpcServer extends AbstractService
     if (rpcMonitor != null) {
       this.rpcMonitor.close();
     }
+    if (securityManager != null) {
+      this.securityManager.stop();
+    }
+    if (this.fedRenameScheduler != null) {
+      fedRenameScheduler.shutDown();
+    }
     super.serviceStop();
+  }
+
+  boolean isEnableRenameAcrossNamespace() {
+    return routerRenameOption != RouterRenameOption.NONE;
+  }
+
+  BalanceProcedureScheduler getFedRenameScheduler() {
+    return this.fedRenameScheduler;
+  }
+
+  /**
+   * Get the RPC security manager.
+   *
+   * @return RPC security manager.
+   */
+  public RouterSecurityManager getRouterSecurityManager() {
+    return this.securityManager;
   }
 
   /**
@@ -440,20 +624,38 @@ public class RouterRpcServer extends AbstractService
     // Store the category of the operation category for this thread
     opCategory.set(op);
 
-    // We allow unchecked and read operations
+    // We allow unchecked and read operations to try, fail later
     if (op == OperationCategory.UNCHECKED || op == OperationCategory.READ) {
       return;
     }
+    checkSafeMode();
+  }
 
-    RouterSafemodeService safemodeService = router.getSafemodeService();
-    if (safemodeService != null && safemodeService.isInSafeMode()) {
+  /**
+   * Check if the Router is in safe mode.
+   * @throws StandbyException If the Router is in safe mode and cannot serve
+   *                          client requests.
+   */
+  private void checkSafeMode() throws StandbyException {
+    if (isSafeMode()) {
       // Throw standby exception, router is not available
       if (rpcMonitor != null) {
         rpcMonitor.routerFailureSafemode();
       }
+      OperationCategory op = opCategory.get();
       throw new StandbyException("Router " + router.getRouterId() +
           " is in safe mode and cannot handle " + op + " requests");
     }
+  }
+
+  /**
+   * Return true if the Router is in safe mode.
+   *
+   * @return true if the Router is in safe mode.
+   */
+  boolean isSafeMode() {
+    RouterSafemodeService safemodeService = router.getSafemodeService();
+    return (safemodeService != null && safemodeService.isInSafeMode());
   }
 
   /**
@@ -465,6 +667,73 @@ public class RouterRpcServer extends AbstractService
     final StackTraceElement[] stack = Thread.currentThread().getStackTrace();
     String methodName = stack[3].getMethodName();
     return methodName;
+  }
+
+  /**
+   * Invokes the method at default namespace, if default namespace is not
+   * available then at the first available namespace.
+   * If the namespace is unavailable, retry once with other namespace.
+   * @param <T> expected return type.
+   * @param method the remote method.
+   * @return the response received after invoking method.
+   * @throws IOException
+   */
+  <T> T invokeAtAvailableNs(RemoteMethod method, Class<T> clazz)
+      throws IOException {
+    String nsId = subclusterResolver.getDefaultNamespace();
+    // If default Ns is not present return result from first namespace.
+    Set<FederationNamespaceInfo> nss = namenodeResolver.getNamespaces();
+    try {
+      if (!nsId.isEmpty()) {
+        return rpcClient.invokeSingle(nsId, method, clazz);
+      }
+      // If no namespace is available, throw IOException.
+      IOException io = new IOException("No namespace available.");
+      return invokeOnNs(method, clazz, io, nss);
+    } catch (IOException ioe) {
+      if (!clientProto.isUnavailableSubclusterException(ioe)) {
+        LOG.debug("{} exception cannot be retried",
+            ioe.getClass().getSimpleName());
+        throw ioe;
+      }
+      Set<FederationNamespaceInfo> nssWithoutFailed = getNameSpaceInfo(nsId);
+      return invokeOnNs(method, clazz, ioe, nssWithoutFailed);
+    }
+  }
+
+  /**
+   * Invoke the method on first available namespace,
+   * throw no namespace available exception, if no namespaces are available.
+   * @param method the remote method.
+   * @param clazz  Class for the return type.
+   * @param ioe    IOException .
+   * @param nss    List of name spaces in the federation
+   * @return the response received after invoking method.
+   * @throws IOException
+   */
+  <T> T invokeOnNs(RemoteMethod method, Class<T> clazz, IOException ioe,
+      Set<FederationNamespaceInfo> nss) throws IOException {
+    if (nss.isEmpty()) {
+      throw ioe;
+    }
+    String nsId = nss.iterator().next().getNameserviceId();
+    return rpcClient.invokeSingle(nsId, method, clazz);
+  }
+
+  /**
+   * Get set of namespace info's removing the already invoked namespaceinfo.
+   * @param nsId already invoked namespace id
+   * @return List of name spaces in the federation on
+   * removing the already invoked namespaceinfo.
+   */
+  private Set<FederationNamespaceInfo> getNameSpaceInfo(String nsId) {
+    Set<FederationNamespaceInfo> namespaceInfos = new HashSet<>();
+    for (FederationNamespaceInfo ns : namespaceInfos) {
+      if (!nsId.equals(ns.getNameserviceId())) {
+        namespaceInfos.add(ns);
+      }
+    }
+    return namespaceInfos;
   }
 
   @Override // ClientProtocol
@@ -507,6 +776,7 @@ public class RouterRpcServer extends AbstractService
         replication, blockSize, supportedVersions, ecPolicyName, storagePolicy);
   }
 
+
   /**
    * Get the location to create a file. It checks if the file already existed
    * in one of the locations.
@@ -515,10 +785,24 @@ public class RouterRpcServer extends AbstractService
    * @return The remote location for this file.
    * @throws IOException If the file has no creation location.
    */
-  RemoteLocation getCreateLocation(final String src)
+  RemoteLocation getCreateLocation(final String src) throws IOException {
+    final List<RemoteLocation> locations = getLocationsForPath(src, true);
+    return getCreateLocation(src, locations);
+  }
+
+  /**
+   * Get the location to create a file. It checks if the file already existed
+   * in one of the locations.
+   *
+   * @param src Path of the file to check.
+   * @param locations Prefetched locations for the file.
+   * @return The remote location for this file.
+   * @throws IOException If the file has no creation location.
+   */
+  RemoteLocation getCreateLocation(
+      final String src, final List<RemoteLocation> locations)
       throws IOException {
 
-    final List<RemoteLocation> locations = getLocationsForPath(src, true);
     if (locations == null || locations.isEmpty()) {
       throw new IOException("Cannot get locations to create " + src);
     }
@@ -526,34 +810,38 @@ public class RouterRpcServer extends AbstractService
     RemoteLocation createLocation = locations.get(0);
     if (locations.size() > 1) {
       try {
-        // Check if this file already exists in other subclusters
-        LocatedBlocks existingLocation = getBlockLocations(src, 0, 1);
+        RemoteLocation existingLocation = getExistingLocation(src, locations);
+        // Forward to the existing location and let the NN handle the error
         if (existingLocation != null) {
-          // Forward to the existing location and let the NN handle the error
-          LocatedBlock existingLocationLastLocatedBlock =
-              existingLocation.getLastLocatedBlock();
-          if (existingLocationLastLocatedBlock == null) {
-            // The block has no blocks yet, check for the meta data
-            for (RemoteLocation location : locations) {
-              RemoteMethod method = new RemoteMethod("getFileInfo",
-                  new Class<?>[] {String.class}, new RemoteParam());
-              if (rpcClient.invokeSingle(location, method) != null) {
-                createLocation = location;
-                break;
-              }
-            }
-          } else {
-            ExtendedBlock existingLocationLastBlock =
-                existingLocationLastLocatedBlock.getBlock();
-            String blockPoolId = existingLocationLastBlock.getBlockPoolId();
-            createLocation = getLocationForPath(src, true, blockPoolId);
-          }
+          LOG.debug("{} already exists in {}.", src, existingLocation);
+          createLocation = existingLocation;
         }
       } catch (FileNotFoundException fne) {
         // Ignore if the file is not found
       }
     }
     return createLocation;
+  }
+
+  /**
+   * Gets the remote location where the file exists.
+   * @param src the name of file.
+   * @param locations all the remote locations.
+   * @return the remote location of the file if it exists, else null.
+   * @throws IOException in case of any exception.
+   */
+  private RemoteLocation getExistingLocation(String src,
+      List<RemoteLocation> locations) throws IOException {
+    RemoteMethod method = new RemoteMethod("getFileInfo",
+        new Class<?>[] {String.class}, new RemoteParam());
+    Map<RemoteLocation, HdfsFileStatus> results = rpcClient.invokeConcurrent(
+        locations, method, true, false, HdfsFileStatus.class);
+    for (RemoteLocation loc : locations) {
+      if (results.get(loc) != null) {
+        return loc;
+      }
+    }
+    return null;
   }
 
   @Override // ClientProtocol
@@ -705,6 +993,13 @@ public class RouterRpcServer extends AbstractService
     return clientProto.getListing(src, startAfter, needLocation);
   }
 
+  @Override
+  public BatchedDirectoryListing getBatchedListing(
+      String[] srcs, byte[] startAfter, boolean needLocation)
+      throws IOException {
+    throw new UnsupportedOperationException();
+  }
+
   @Override // ClientProtocol
   public HdfsFileStatus getFileInfo(String src) throws IOException {
     return clientProto.getFileInfo(src);
@@ -738,6 +1033,50 @@ public class RouterRpcServer extends AbstractService
   }
 
   /**
+   * Get the datanode report from cache.
+   *
+   * @param type Type of the datanode.
+   * @return List of datanodes.
+   * @throws IOException If it cannot get the report.
+   */
+  DatanodeInfo[] getCachedDatanodeReport(DatanodeReportType type)
+      throws IOException {
+    try {
+      DatanodeInfo[] dns = this.dnCache.get(type);
+      if (dns == null) {
+        LOG.debug("Get null DN report from cache");
+        dns = getCachedDatanodeReportImpl(type);
+        this.dnCache.put(type, dns);
+      }
+      return dns;
+    } catch (ExecutionException e) {
+      LOG.error("Cannot get the DN report for {}", type, e);
+      Throwable cause = e.getCause();
+      if (cause instanceof IOException) {
+        throw (IOException) cause;
+      } else {
+        throw new IOException(cause);
+      }
+    }
+  }
+
+  private DatanodeInfo[] getCachedDatanodeReportImpl(
+      final DatanodeReportType type) throws IOException {
+    // We need to get the DNs as a privileged user
+    UserGroupInformation loginUser = UserGroupInformation.getLoginUser();
+    RouterRpcServer.setCurrentUser(loginUser);
+
+    try {
+      DatanodeInfo[] dns = clientProto.getDatanodeReport(type);
+      LOG.debug("Refresh cached DN report with {} datanodes", dns.length);
+      return dns;
+    } finally {
+      // Reset ugi to remote user for remaining operations.
+      RouterRpcServer.resetCurrentUser();
+    }
+  }
+
+  /**
    * Get the datanode report with a timeout.
    * @param type Type of the datanode.
    * @param requireResponse If we require all the namespaces to report.
@@ -764,7 +1103,8 @@ public class RouterRpcServer extends AbstractService
       DatanodeInfo[] result = entry.getValue();
       for (DatanodeInfo node : result) {
         String nodeId = node.getXferAddr();
-        if (!datanodesMap.containsKey(nodeId)) {
+        DatanodeInfo dn = datanodesMap.get(nodeId);
+        if (dn == null || node.getLastUpdate() > dn.getLastUpdate()) {
           // Add the subcluster as a suffix to the network location
           node.setNetworkLocation(
               NodeBase.PATH_SEPARATOR_STR + ns.getNameserviceId() +
@@ -898,12 +1238,12 @@ public class RouterRpcServer extends AbstractService
     return clientProto.getLinkTarget(path);
   }
 
-  @Override // Client Protocol
+  @Override // ClientProtocol
   public void allowSnapshot(String snapshotRoot) throws IOException {
     clientProto.allowSnapshot(snapshotRoot);
   }
 
-  @Override // Client Protocol
+  @Override // ClientProtocol
   public void disallowSnapshot(String snapshot) throws IOException {
     clientProto.disallowSnapshot(snapshot);
   }
@@ -914,10 +1254,16 @@ public class RouterRpcServer extends AbstractService
     clientProto.renameSnapshot(snapshotRoot, snapshotOldName, snapshotNewName);
   }
 
-  @Override // Client Protocol
+  @Override // ClientProtocol
   public SnapshottableDirectoryStatus[] getSnapshottableDirListing()
       throws IOException {
     return clientProto.getSnapshottableDirListing();
+  }
+
+  @Override // ClientProtocol
+  public SnapshotStatus[] getSnapshotListing(String snapshotRoot)
+      throws IOException {
+    return clientProto.getSnapshotListing(snapshotRoot);
   }
 
   @Override // ClientProtocol
@@ -1172,6 +1518,12 @@ public class RouterRpcServer extends AbstractService
     clientProto.unsetErasureCodingPolicy(src);
   }
 
+  @Override
+  public ECTopologyVerifierResult getECTopologyResultForPolicies(
+      String... policyNames) throws IOException {
+    return clientProto.getECTopologyResultForPolicies(policyNames);
+  }
+
   @Override // ClientProtocol
   public ECBlockGroupStats getECBlockGroupStats() throws IOException {
     return clientProto.getECBlockGroupStats();
@@ -1213,8 +1565,9 @@ public class RouterRpcServer extends AbstractService
 
   @Override // NamenodeProtocol
   public BlocksWithLocations getBlocks(DatanodeInfo datanode, long size,
-      long minBlockSize) throws IOException {
-    return nnProto.getBlocks(datanode, size, minBlockSize);
+      long minBlockSize, long hotBlockTimeInterval) throws IOException {
+    return nnProto.getBlocks(datanode, size, minBlockSize,
+            hotBlockTimeInterval);
   }
 
   @Override // NamenodeProtocol
@@ -1341,7 +1694,8 @@ public class RouterRpcServer extends AbstractService
    * Get the possible locations of a path in the federated cluster.
    *
    * @param path Path to check.
-   * @param failIfLocked Fail the request if locked (top mount point).
+   * @param failIfLocked Fail the request if there is any mount point under
+   *                     the path.
    * @param needQuotaVerify If need to do the quota verification.
    * @return Prioritized list of locations in the federated cluster.
    * @throws IOException If the location for this path cannot be determined.
@@ -1349,6 +1703,27 @@ public class RouterRpcServer extends AbstractService
   protected List<RemoteLocation> getLocationsForPath(String path,
       boolean failIfLocked, boolean needQuotaVerify) throws IOException {
     try {
+      if (failIfLocked) {
+        // check if there is any mount point under the path
+        final List<String> mountPoints =
+            this.subclusterResolver.getMountPoints(path);
+        if (mountPoints != null) {
+          StringBuilder sb = new StringBuilder();
+          sb.append("The operation is not allowed because ");
+          if (mountPoints.isEmpty()) {
+            sb.append("the path: ")
+                .append(path)
+                .append(" is a mount point");
+          } else {
+            sb.append("there are mount points: ")
+                .append(String.join(",", mountPoints))
+                .append(" under the path: ")
+                .append(path);
+          }
+          throw new AccessControlException(sb.toString());
+        }
+      }
+
       // Check the location for this path
       final PathLocation location =
           this.subclusterResolver.getDestinationForPath(path);
@@ -1374,6 +1749,7 @@ public class RouterRpcServer extends AbstractService
           if (quotaUsage != null) {
             quotaUsage.verifyNamespaceQuota();
             quotaUsage.verifyStoragespaceQuota();
+            quotaUsage.verifyQuotaByStorageType();
           }
         }
       }
@@ -1390,6 +1766,9 @@ public class RouterRpcServer extends AbstractService
     } catch (IOException ioe) {
       if (this.rpcMonitor != null) {
         this.rpcMonitor.routerFailureStateStore();
+      }
+      if (ioe instanceof StateStoreUnavailableException) {
+        checkSafeMode();
       }
       throw ioe;
     }
@@ -1422,9 +1801,24 @@ public class RouterRpcServer extends AbstractService
    * @return Remote user group information.
    * @throws IOException If we cannot get the user information.
    */
-  static UserGroupInformation getRemoteUser() throws IOException {
-    UserGroupInformation ugi = Server.getRemoteUser();
+  public static UserGroupInformation getRemoteUser() throws IOException {
+    UserGroupInformation ugi = CUR_USER.get();
+    ugi = (ugi != null) ? ugi : Server.getRemoteUser();
     return (ugi != null) ? ugi : UserGroupInformation.getCurrentUser();
+  }
+
+  /**
+   * Set super user credentials if needed.
+   */
+  static void setCurrentUser(UserGroupInformation ugi) {
+    CUR_USER.set(ugi);
+  }
+
+  /**
+   * Reset to discard super user credentials.
+   */
+  static void resetCurrentUser() {
+    CUR_USER.set(null);
   }
 
   /**
@@ -1435,14 +1829,16 @@ public class RouterRpcServer extends AbstractService
    * @param clazz Class of the values.
    * @return Array with the outputs.
    */
-  protected static <T> T[] merge(
+  static <T> T[] merge(
       Map<FederationNamespaceInfo, T[]> map, Class<T> clazz) {
 
     // Put all results into a set to avoid repeats
     Set<T> ret = new LinkedHashSet<>();
     for (T[] values : map.values()) {
-      for (T val : values) {
-        ret.add(val);
+      if (values != null) {
+        for (T val : values) {
+          ret.add(val);
+        }
       }
     }
 
@@ -1456,7 +1852,7 @@ public class RouterRpcServer extends AbstractService
    * @param clazz Class of the values.
    * @return Array with the values in set.
    */
-  private static <T> T[] toArray(Collection<T> set, Class<T> clazz) {
+  static <T> T[] toArray(Collection<T> set, Class<T> clazz) {
     @SuppressWarnings("unchecked")
     T[] combinedData = (T[]) Array.newInstance(clazz, set.size());
     combinedData = set.toArray(combinedData);
@@ -1472,10 +1868,151 @@ public class RouterRpcServer extends AbstractService
   }
 
   /**
+   * Get ClientProtocol module implementation.
+   * @return ClientProtocol implementation
+   */
+  @VisibleForTesting
+  public RouterClientProtocol getClientProtocolModule() {
+    return this.clientProto;
+  }
+
+  /**
    * Get RPC metrics info.
    * @return The instance of FederationRPCMetrics.
    */
   public FederationRPCMetrics getRPCMetrics() {
     return this.rpcMonitor.getRPCMetrics();
+  }
+
+  /**
+   * Check if a path should be in all subclusters.
+   *
+   * @param path Path to check.
+   * @return If a path should be in all subclusters.
+   */
+  boolean isPathAll(final String path) {
+    if (subclusterResolver instanceof MountTableResolver) {
+      try {
+        MountTableResolver mountTable = (MountTableResolver) subclusterResolver;
+        MountTable entry = mountTable.getMountPoint(path);
+        if (entry != null) {
+          return entry.isAll();
+        }
+      } catch (IOException e) {
+        LOG.error("Cannot get mount point", e);
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Check if a path supports failed subclusters.
+   *
+   * @param path Path to check.
+   * @return If a path should support failed subclusters.
+   */
+  boolean isPathFaultTolerant(final String path) {
+    if (subclusterResolver instanceof MountTableResolver) {
+      try {
+        MountTableResolver mountTable = (MountTableResolver) subclusterResolver;
+        MountTable entry = mountTable.getMountPoint(path);
+        if (entry != null) {
+          return entry.isFaultTolerant();
+        }
+      } catch (IOException e) {
+        LOG.error("Cannot get mount point", e);
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Check if call needs to be invoked to all the locations. The call is
+   * supposed to be invoked in all the locations in case the order of the mount
+   * entry is amongst HASH_ALL, RANDOM or SPACE or if the source is itself a
+   * mount entry.
+   * @param path The path on which the operation need to be invoked.
+   * @return true if the call is supposed to invoked on all locations.
+   * @throws IOException
+   */
+  boolean isInvokeConcurrent(final String path) throws IOException {
+    if (subclusterResolver instanceof MountTableResolver) {
+      MountTableResolver mountTableResolver =
+          (MountTableResolver) subclusterResolver;
+      List<String> mountPoints = mountTableResolver.getMountPoints(path);
+      // If this is a mount point, we need to invoke everywhere.
+      if (mountPoints != null) {
+        return true;
+      }
+      return isPathAll(path);
+    }
+    return false;
+  }
+
+  @Override
+  public void refreshUserToGroupsMappings() throws IOException {
+    routerProto.refreshUserToGroupsMappings();
+  }
+
+  @Override
+  public void refreshSuperUserGroupsConfiguration() throws IOException {
+    routerProto.refreshSuperUserGroupsConfiguration();
+  }
+
+  @Override
+  public String[] getGroupsForUser(String user) throws IOException {
+    return routerProto.getGroupsForUser(user);
+  }
+
+  public int getRouterFederationRenameCount() {
+    return clientProto.getRouterFederationRenameCount();
+  }
+
+  public int getSchedulerJobCount() {
+    if (fedRenameScheduler == null) {
+      return 0;
+    }
+    return fedRenameScheduler.getAllJobs().size();
+  }
+
+  /**
+   * Deals with loading datanode report into the cache and refresh.
+   */
+  private class DatanodeReportCacheLoader
+      extends CacheLoader<DatanodeReportType, DatanodeInfo[]> {
+
+    private ListeningExecutorService executorService;
+
+    DatanodeReportCacheLoader() {
+      ThreadFactory threadFactory = new ThreadFactoryBuilder()
+          .setNameFormat("DatanodeReport-Cache-Reload")
+          .setDaemon(true)
+          .build();
+
+      executorService = MoreExecutors.listeningDecorator(
+          Executors.newSingleThreadExecutor(threadFactory));
+    }
+
+    @Override
+    public DatanodeInfo[] load(DatanodeReportType type) throws Exception {
+      return getCachedDatanodeReportImpl(type);
+    }
+
+    /**
+     * Override the reload method to provide an asynchronous implementation,
+     * so that the query will not be slowed down by the cache refresh. It
+     * will return the old cache value and schedule a background refresh.
+     */
+    @Override
+    public ListenableFuture<DatanodeInfo[]> reload(
+        final DatanodeReportType type, DatanodeInfo[] oldValue)
+        throws Exception {
+      return executorService.submit(new Callable<DatanodeInfo[]>() {
+        @Override
+        public DatanodeInfo[] call() throws Exception {
+          return load(type);
+        }
+      });
+    }
   }
 }

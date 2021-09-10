@@ -42,8 +42,8 @@ import org.apache.hadoop.security.UserGroupInformation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.net.HostAndPort;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.net.HostAndPort;
 
 
 /**
@@ -196,7 +196,7 @@ public class LocalResolver extends RouterResolver<String, String> {
         try {
           String nsId = nn.getNameserviceId();
           String rpcAddress = nn.getRpcAddress();
-          String hostname = HostAndPort.fromString(rpcAddress).getHostText();
+          String hostname = HostAndPort.fromString(rpcAddress).getHost();
           ret.put(hostname, nsId);
           if (hostname.equals(localHostname)) {
             ret.put(localIp, nsId);

@@ -60,6 +60,7 @@ import org.apache.hadoop.yarn.server.resourcemanager.webapp.dao.ReservationSubmi
 import org.apache.hadoop.yarn.server.resourcemanager.webapp.dao.ReservationUpdateRequestInfo;
 import org.apache.hadoop.yarn.server.resourcemanager.webapp.dao.ResourceInfo;
 import org.apache.hadoop.yarn.server.resourcemanager.webapp.dao.ResourceOptionInfo;
+import org.apache.hadoop.yarn.server.resourcemanager.webapp.dao.BulkActivitiesInfo;
 import org.apache.hadoop.yarn.server.resourcemanager.webapp.dao.SchedulerTypeInfo;
 
 /**
@@ -186,6 +187,7 @@ public interface RMWebServiceProtocol {
    * @param finishEnd filter the result by finish end time. It is a QueryParam.
    * @param applicationTypes filter the result by types. It is a QueryParam.
    * @param applicationTags filter the result by tags. It is a QueryParam.
+   * @param name filter the name of the application. It is a QueryParam.
    * @param unselectedFields De-selected params to avoid from report. It is a
    *          QueryParam.
    * @return all apps in the cluster
@@ -195,7 +197,7 @@ public interface RMWebServiceProtocol {
       Set<String> statesQuery, String finalStatusQuery, String userQuery,
       String queueQuery, String count, String startedBegin, String startedEnd,
       String finishBegin, String finishEnd, Set<String> applicationTypes,
-      Set<String> applicationTags, Set<String> unselectedFields);
+      Set<String> applicationTags, String name, Set<String> unselectedFields);
 
   /**
    * This method retrieve all the activities in a specific node, and it is
@@ -204,9 +206,25 @@ public interface RMWebServiceProtocol {
    * @param hsr the servlet request
    * @param nodeId the node we want to retrieve the activities. It is a
    *          QueryParam.
+   * @param groupBy the groupBy type by which the activities should be
+   *          aggregated. It is a QueryParam.
    * @return all the activities in the specific node
    */
-  ActivitiesInfo getActivities(HttpServletRequest hsr, String nodeId);
+  ActivitiesInfo getActivities(HttpServletRequest hsr, String nodeId,
+      String groupBy);
+
+  /**
+   * This method retrieve the last n activities inside scheduler and it is
+   * reachable by using {@link RMWSConsts#SCHEDULER_BULK_ACTIVITIES}.
+   *
+   * @param hsr the servlet request
+   * @param groupBy the groupBy type by which the activities should be
+   *        aggregated. It is a QueryParam.
+   * @param activitiesCount number of activities
+   * @return last n activities
+   */
+  BulkActivitiesInfo getBulkActivities(HttpServletRequest hsr,
+      String groupBy, int activitiesCount) throws InterruptedException;
 
   /**
    * This method retrieves all the activities for a specific app for a specific
@@ -218,10 +236,22 @@ public interface RMWebServiceProtocol {
    *          QueryParam.
    * @param time for how long we want to retrieve the activities. It is a
    *          QueryParam.
+   * @param requestPriorities the request priorities we want to retrieve the
+   *          activities. It is a QueryParam.
+   * @param allocationRequestIds the allocation request ids we want to retrieve
+   *          the activities. It is a QueryParam.
+   * @param groupBy the groupBy type by which the activities should be
+   *          aggregated. It is a QueryParam.
+   * @param limit set a limit of the result. It is a QueryParam.
+   * @param actions the required actions of app activities. It is a QueryParam.
+   * @param summarize whether app activities in multiple scheduling processes
+   *          need to be summarized. It is a QueryParam.
    * @return all the activities about a specific app for a specific time
    */
   AppActivitiesInfo getAppActivities(HttpServletRequest hsr, String appId,
-      String time);
+      String time, Set<String> requestPriorities,
+      Set<String> allocationRequestIds, String groupBy, String limit,
+      Set<String> actions, boolean summarize);
 
   /**
    * This method retrieves all the statistics for a specific app, and it is
@@ -702,4 +732,17 @@ public interface RMWebServiceProtocol {
   RMQueueAclInfo checkUserAccessToQueue(String queue, String username,
       String queueAclType, HttpServletRequest hsr)
       throws AuthorizationException;
+
+  /**
+   * This method sends a signal to container.
+   * @param containerId containerId
+   * @param command signal command, it could be OUTPUT_THREAD_DUMP/
+   *                GRACEFUL_SHUTDOWN/FORCEFUL_SHUTDOWN
+   * @param req request
+   * @return Response containing the status code
+   * @throws AuthorizationException if the user is not authorized to invoke this
+   *                                method.
+   */
+  Response signalToContainer(String containerId, String command,
+      HttpServletRequest req) throws AuthorizationException;
 }

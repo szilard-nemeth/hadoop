@@ -222,4 +222,20 @@ public class RMNodeWrapper implements RMNode {
   public Resource getPhysicalResource() {
     return null;
   }
+
+  @Override
+  public boolean isUpdatedCapability() {
+    return false;
+  }
+
+  @Override
+  public void resetUpdatedCapability() {
+  }
+
+  @Override
+  public long calculateHeartBeatInterval(
+      long defaultInterval, long minInterval, long maxInterval,
+      float speedupFactor, float slowdownFactor) {
+    return defaultInterval;
+  }
 }

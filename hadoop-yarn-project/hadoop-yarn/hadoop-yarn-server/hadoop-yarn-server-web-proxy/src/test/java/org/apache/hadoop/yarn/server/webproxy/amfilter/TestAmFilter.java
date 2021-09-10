@@ -44,12 +44,13 @@ import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.fail;
 
-import com.google.common.base.Supplier;
+import java.util.function.Supplier;
 import org.apache.hadoop.http.TestHttpServer;
 import org.apache.hadoop.test.GenericTestUtils;
 import org.apache.hadoop.yarn.server.webproxy.ProxyUtils;
@@ -163,12 +164,12 @@ public class TestAmFilter {
     spy.proxyUriBases.put(rm2, rm2Url);
     spy.rmUrls = new String[] { rm1, rm2 };
 
-    assertEquals(spy.findRedirectUrl(), rm1Url);
+    assertThat(spy.findRedirectUrl()).isEqualTo(rm1Url);
   }
 
   private String startHttpServer() throws Exception {
     Server server = new Server(0);
-    ((QueuedThreadPool)server.getThreadPool()).setMaxThreads(10);
+    ((QueuedThreadPool)server.getThreadPool()).setMaxThreads(20);
     ServletContextHandler context = new ServletContextHandler();
     context.setContextPath("/foo");
     server.setHandler(context);

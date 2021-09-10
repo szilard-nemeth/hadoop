@@ -35,6 +35,8 @@ import org.apache.hadoop.hdfs.DFSUtilClient;
 import org.apache.hadoop.hdfs.HAUtilClient;
 import org.apache.hadoop.hdfs.client.HdfsClientConfigKeys;
 import org.apache.hadoop.io.retry.FailoverProxyProvider;
+import org.apache.hadoop.net.DomainNameResolver;
+import org.apache.hadoop.net.DomainNameResolverFactory;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -115,7 +117,8 @@ public abstract class AbstractNNFailoverProxyProvider<T> implements
     /**
      * The currently known state of the NameNode represented by this ProxyInfo.
      * This may be out of date if the NameNode has changed state since the last
-     * time the state was checked.
+     * time the state was checked. If the NameNode could not be contacted, this
+     * will store null to indicate an unknown state.
      */
     private HAServiceState cachedState;
 
@@ -176,6 +179,11 @@ public abstract class AbstractNNFailoverProxyProvider<T> implements
     }
 
     Collection<InetSocketAddress> addressesOfNns = addressesInNN.values();
+    try {
+      addressesOfNns = getResolvedHostsIfNecessary(addressesOfNns, uri);
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
     for (InetSocketAddress address : addressesOfNns) {
       proxies.add(new NNProxyInfo<T>(address));
     }
@@ -190,6 +198,56 @@ public abstract class AbstractNNFailoverProxyProvider<T> implements
     // underlying IPC addresses so that the IPC code can find it.
     HAUtilClient.cloneDelegationTokenForLogicalUri(ugi, uri, addressesOfNns);
     return proxies;
+  }
+
+  /**
+   * If resolved is needed: for every domain name in the parameter list,
+   * resolve them into the actual IP addresses.
+   *
+   * @param addressesOfNns The domain name list from config.
+   * @param nameNodeUri The URI of namenode/nameservice.
+   * @return The collection of resolved IP addresses.
+   * @throws IOException If there are issues resolving the addresses.
+   */
+  Collection<InetSocketAddress> getResolvedHostsIfNecessary(
+      Collection<InetSocketAddress> addressesOfNns, URI nameNodeUri)
+          throws IOException {
+    // 'host' here is usually the ID of the nameservice when address
+    // resolving is needed.
+    String host = nameNodeUri.getHost();
+    String configKeyWithHost =
+        HdfsClientConfigKeys.Failover.RESOLVE_ADDRESS_NEEDED_KEY  + "." + host;
+    boolean resolveNeeded = conf.getBoolean(configKeyWithHost,
+        HdfsClientConfigKeys.Failover.RESOLVE_ADDRESS_NEEDED_DEFAULT);
+    if (!resolveNeeded) {
+      // Early return is no resolve is necessary
+      return addressesOfNns;
+    }
+    // decide whether to access server by IP or by host name
+    String useFQDNKeyWithHost =
+        HdfsClientConfigKeys.Failover.RESOLVE_ADDRESS_TO_FQDN + "." + host;
+    boolean requireFQDN = conf.getBoolean(useFQDNKeyWithHost,
+        HdfsClientConfigKeys.Failover.RESOLVE_ADDRESS_TO_FQDN_DEFAULT);
+
+    Collection<InetSocketAddress> addressOfResolvedNns = new ArrayList<>();
+    DomainNameResolver dnr = DomainNameResolverFactory.newInstance(
+          conf, nameNodeUri, HdfsClientConfigKeys.Failover.RESOLVE_SERVICE_KEY);
+    // If the address needs to be resolved, get all of the IP addresses
+    // from this address and pass them into the proxy
+    LOG.debug("Namenode domain name will be resolved with {}",
+        dnr.getClass().getName());
+    for (InetSocketAddress address : addressesOfNns) {
+      String[] resolvedHostNames = dnr.getAllResolvedHostnameByDomainName(
+          address.getHostName(), requireFQDN);
+      int port = address.getPort();
+      for (String hostname : resolvedHostNames) {
+        InetSocketAddress resolvedAddress = new InetSocketAddress(
+            hostname, port);
+        addressOfResolvedNns.add(resolvedAddress);
+      }
+    }
+
+    return addressOfResolvedNns;
   }
 
   /**

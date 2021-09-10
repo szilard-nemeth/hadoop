@@ -53,7 +53,7 @@ public class AbfsRestOperationException extends AzureBlobFileSystemException {
       final String errorMessage,
       final Exception innerException,
       final AbfsHttpOperation abfsHttpOperation) {
-    super(formatMessage(abfsHttpOperation));
+    super(formatMessage(abfsHttpOperation), innerException);
 
     this.statusCode = statusCode;
     this.errorCode = AzureServiceErrorCode.getAzureServiceCode(this.statusCode, errorCode);
@@ -61,7 +61,7 @@ public class AbfsRestOperationException extends AzureBlobFileSystemException {
   }
 
   public AbfsRestOperationException(final HttpException innerException) {
-    super(innerException.getMessage());
+    super(innerException.getMessage(), innerException);
 
     this.statusCode = innerException.getHttpErrorCode();
     this.errorCode = AzureServiceErrorCode.UNKNOWN;
@@ -87,7 +87,7 @@ public class AbfsRestOperationException extends AzureBlobFileSystemException {
               "Operation failed: \"%1$s\", %2$s, HEAD, %3$s",
               abfsHttpOperation.getStatusDescription(),
               abfsHttpOperation.getStatusCode(),
-              abfsHttpOperation.getUrl().toString());
+              abfsHttpOperation.getMaskedUrl());
     }
 
     return String.format(
@@ -95,7 +95,7 @@ public class AbfsRestOperationException extends AzureBlobFileSystemException {
             abfsHttpOperation.getStatusDescription(),
             abfsHttpOperation.getStatusCode(),
             abfsHttpOperation.getMethod(),
-            abfsHttpOperation.getUrl().toString(),
+            abfsHttpOperation.getMaskedUrl(),
             abfsHttpOperation.getStorageErrorCode(),
             // Remove break line to ensure the request id and timestamp can be shown in console.
             abfsHttpOperation.getStorageErrorMessage().replaceAll("\\n", " "));

@@ -18,8 +18,6 @@
 package org.apache.hadoop.hdfs.server.federation.router;
 
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.List;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -66,7 +64,7 @@ public class RouterPermissionChecker extends FSPermissionChecker {
    * @param mountTable
    *          MountTable being accessed
    * @param access
-   *          type of action being performed on the cache pool
+   *          type of action being performed on the mount table entry
    * @throws AccessControlException
    *           if mount table cannot be accessed
    */
@@ -121,13 +119,12 @@ public class RouterPermissionChecker extends FSPermissionChecker {
     }
 
     // Is this by the Router user itself?
-    if (ugi.getUserName().equals(superUser)) {
+    if (ugi.getShortUserName().equals(superUser)) {
       return;
     }
 
     // Is the user a member of the super group?
-    List<String> groups = Arrays.asList(ugi.getGroupNames());
-    if (groups.contains(superGroup)) {
+    if (ugi.getGroupsSet().contains(superGroup)) {
       return;
     }
 

@@ -17,8 +17,8 @@
  */
 package org.apache.hadoop.hdfs;
 
-import com.google.common.base.Preconditions;
-import com.google.common.base.Supplier;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
+import java.util.function.Supplier;
 import org.apache.commons.lang3.builder.ToStringBuilder;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSDataOutputStream;
@@ -35,11 +35,11 @@ import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.test.GenericTestUtils;
 import org.apache.hadoop.test.Whitebox;
 import org.apache.hadoop.util.StringUtils;
-import org.apache.log4j.Level;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
+import org.slf4j.event.Level;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -71,7 +71,7 @@ public class TestLeaseRecoveryStriped {
   private static final int bytesPerChecksum = 512;
 
   static {
-    GenericTestUtils.setLogLevel(DataNode.LOG, Level.ALL);
+    GenericTestUtils.setLogLevel(DataNode.LOG, Level.TRACE);
     GenericTestUtils.setLogLevel(DFSStripedOutputStream.LOG, Level.DEBUG);
     GenericTestUtils.setLogLevel(BlockRecoveryWorker.LOG, Level.DEBUG);
     GenericTestUtils.setLogLevel(DataStreamer.LOG, Level.DEBUG);
@@ -92,8 +92,6 @@ public class TestLeaseRecoveryStriped {
     conf = new HdfsConfiguration();
     conf.setLong(DFSConfigKeys.DFS_BLOCK_SIZE_KEY, blockSize);
     conf.setLong(HdfsClientConfigKeys.DFS_CLIENT_SOCKET_TIMEOUT_KEY, 60000L);
-    conf.setBoolean(DFSConfigKeys.DFS_NAMENODE_REDUNDANCY_CONSIDERLOAD_KEY,
-        false);
     conf.setInt(DFSConfigKeys.DFS_HEARTBEAT_INTERVAL_KEY, 1);
     conf.setInt(DFSConfigKeys.DFS_NAMENODE_REPLICATION_MAX_STREAMS_KEY, 0);
     final int numDNs = dataBlocks + parityBlocks;

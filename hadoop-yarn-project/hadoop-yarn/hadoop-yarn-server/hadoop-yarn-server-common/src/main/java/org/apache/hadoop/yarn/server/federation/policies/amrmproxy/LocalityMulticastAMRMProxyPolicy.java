@@ -50,8 +50,8 @@ import org.apache.hadoop.yarn.server.federation.utils.FederationStateStoreFacade
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
 
 /**
  * An implementation of the {@link FederationAMRMProxyPolicy} interface that
@@ -68,7 +68,7 @@ import com.google.common.base.Preconditions;
  * <p>
  * Rack localized {@link ResourceRequest}s are forwarded to the RMs that owns
  * the corresponding rack. Note that in some deployments each rack could be
- * striped across multiple RMs. Thsi policy respects that. If the
+ * striped across multiple RMs. This policy respects that. If the
  * {@link SubClusterResolver} cannot resolve this rack we default to forwarding
  * the {@link ResourceRequest} to the home sub-cluster.
  * </p>
@@ -265,11 +265,8 @@ public class LocalityMulticastAMRMProxyPolicy extends AbstractAMRMProxyPolicy {
       // any cluster. Pick a random sub-cluster from active and enabled ones.
       targetId = getSubClusterForUnResolvedRequest(bookkeeper,
           rr.getAllocationRequestId());
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("ERROR resolving sub-cluster for resourceName: "
-            + rr.getResourceName() + ", picked a random subcluster to forward:"
-            + targetId);
-      }
+      LOG.debug("ERROR resolving sub-cluster for resourceName: {}, picked a "
+          + "random subcluster to forward:{}", rr.getResourceName(), targetId);
       if (targetIds != null && targetIds.size() > 0) {
         bookkeeper.addRackRR(targetId, rr);
       } else {
@@ -466,7 +463,7 @@ public class LocalityMulticastAMRMProxyPolicy extends AbstractAMRMProxyPolicy {
     float headroomWeighting =
         1 / (float) allocationBookkeeper.getActiveAndEnabledSC().size();
 
-    // if we have headroom infomration for this sub-cluster (and we are safe
+    // if we have headroom information for this sub-cluster (and we are safe
     // from /0 issues)
     if (headroom.containsKey(targetId)
         && allocationBookkeeper.totHeadroomMemory > 0) {
@@ -607,7 +604,7 @@ public class LocalityMulticastAMRMProxyPolicy extends AbstractAMRMProxyPolicy {
     }
 
     /**
-     * Add a rack-local request to the final asnwer.
+     * Add a rack-local request to the final answer.
      */
     private void addRackRR(SubClusterId targetId, ResourceRequest rr) {
       Preconditions

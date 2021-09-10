@@ -18,9 +18,9 @@
 
 package org.apache.hadoop.yarn.service;
 
-import com.google.common.cache.CacheBuilder;
-import com.google.common.cache.CacheLoader;
-import com.google.common.cache.LoadingCache;
+import org.apache.hadoop.thirdparty.com.google.common.cache.CacheBuilder;
+import org.apache.hadoop.thirdparty.com.google.common.cache.CacheLoader;
+import org.apache.hadoop.thirdparty.com.google.common.cache.LoadingCache;
 import com.sun.jersey.api.client.ClientResponse;
 import com.sun.jersey.api.client.WebResource.Builder;
 
@@ -737,7 +737,7 @@ public class ServiceScheduler extends CompositeService {
           LOG.warn(
               "Container {} Completed. No component instance exists. exitStatus={}. diagnostics={} ",
               containerId, status.getExitStatus(), status.getDiagnostics());
-          return;
+          continue;
         }
         ComponentEvent event =
             new ComponentEvent(instance.getCompName(), CONTAINER_COMPLETED)
@@ -1112,18 +1112,18 @@ public class ServiceScheduler extends CompositeService {
           } else {
             requestPath.append("http://");
           }
-          requestPath.append(bareHost);
-          requestPath.append(":");
-          requestPath.append(port);
-          requestPath.append("/ws/v1/node/yarn/sysfs/");
-          requestPath.append(UserGroupInformation.getCurrentUser()
-              .getShortUserName());
-          requestPath.append("/");
-          requestPath.append(yarnApp.getId());
+          requestPath.append(bareHost)
+              .append(":")
+              .append(port)
+              .append("/ws/v1/node/yarn/sysfs/")
+              .append(UserGroupInformation.getCurrentUser()
+                  .getShortUserName())
+              .append("/")
+              .append(yarnApp.getId());
           if (!useKerberos) {
-            requestPath.append("?user.name=");
-            requestPath.append(UserGroupInformation.getCurrentUser()
-                .getShortUserName());
+            requestPath.append("?user.name=")
+                .append(UserGroupInformation.getCurrentUser()
+                    .getShortUserName());
           }
           Builder builder = HttpUtil.connect(requestPath.toString());
           ClientResponse response = builder.put(ClientResponse.class, spec);

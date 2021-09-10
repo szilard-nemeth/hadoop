@@ -37,8 +37,8 @@ import java.util.concurrent.locks.ReentrantReadWriteLock.ReadLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock.WriteLock;
 
 import org.apache.commons.lang3.StringUtils;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.hadoop.classification.InterfaceAudience.Private;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.service.AbstractService;
@@ -58,12 +58,13 @@ import org.apache.hadoop.yarn.nodelabels.event.StoreNewClusterNodeLabels;
 import org.apache.hadoop.yarn.nodelabels.event.UpdateNodeToLabelsMappingsEvent;
 import org.apache.hadoop.yarn.util.resource.Resources;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.ImmutableSet;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.collect.ImmutableSet;
 
 @Private
 public class CommonNodeLabelsManager extends AbstractService {
-  protected static final Log LOG = LogFactory.getLog(CommonNodeLabelsManager.class);
+  protected static final Logger LOG =
+      LoggerFactory.getLogger(CommonNodeLabelsManager.class);
   public static final Set<String> EMPTY_STRING_SET = Collections
       .unmodifiableSet(new HashSet<String>(0));
   public static final Set<NodeLabel> EMPTY_NODELABEL_SET = Collections
@@ -94,6 +95,8 @@ public class CommonNodeLabelsManager extends AbstractService {
       new ConcurrentHashMap<String, RMNodeLabel>();
   protected ConcurrentMap<String, Host> nodeCollections =
       new ConcurrentHashMap<String, Host>();
+  private ConcurrentMap<NodeId, Boolean> isNodeLabelFromHost =
+      new ConcurrentHashMap<NodeId, Boolean>();
 
   protected RMNodeLabel noNodeLabel;
 
@@ -558,6 +561,55 @@ public class CommonNodeLabelsManager extends AbstractService {
     addNodeToLabels(node, newLabels);
   }
 
+  private void addLabelsToNodeInHost(NodeId node, Set<String> labels)
+       throws IOException {
+    Host host = nodeCollections.get(node.getHost());
+    if (null == host) {
+      throw new IOException("Cannot add labels to a host that "
+              + "does not exist. Create the host before adding labels to it.");
+    }
+    Node nm = host.nms.get(node);
+    if (nm != null) {
+      Node newNm = nm.copy();
+      if (newNm.labels == null) {
+        newNm.labels =
+            Collections.newSetFromMap(new ConcurrentHashMap<String, Boolean>());
+      }
+      newNm.labels.addAll(labels);
+      host.nms.put(node, newNm);
+    }
+  }
+
+  protected void removeLabelsFromNodeInHost(NodeId node, Set<String> labels)
+      throws IOException {
+    Host host = nodeCollections.get(node.getHost());
+    if (null == host) {
+      throw new IOException("Cannot remove labels from a host that "
+              + "does not exist. Create the host before adding labels to it.");
+    }
+    Node nm = host.nms.get(node);
+    if (nm != null) {
+      if (nm.labels == null) {
+        nm.labels = new HashSet<String>();
+      } else {
+        nm.labels.removeAll(labels);
+      }
+    }
+  }
+
+  private void replaceLabelsForNode(NodeId node, Set<String> oldLabels,
+      Set<String> newLabels) throws IOException {
+    if(oldLabels != null) {
+      removeLabelsFromNodeInHost(node, oldLabels);
+    }
+    addLabelsToNodeInHost(node, newLabels);
+  }
+
+  protected boolean isNodeLabelExplicit(NodeId nodeId) {
+    return !isNodeLabelFromHost.containsKey(nodeId) ||
+        isNodeLabelFromHost.get(nodeId);
+  }
+
   @SuppressWarnings("unchecked")
   protected void internalUpdateLabelsOnNodes(
       Map<NodeId, Set<String>> nodeToLabels, NodeLabelUpdateOperation op)
@@ -592,15 +644,19 @@ public class CommonNodeLabelsManager extends AbstractService {
               node.labels.addAll(labels);
             }
             addNodeToLabels(node.nodeId, labels);
+            isNodeLabelFromHost.put(node.nodeId, true);
           }
           break;
         case REPLACE:
           replaceNodeForLabels(nodeId, host.labels, labels);
+          replaceLabelsForNode(nodeId, host.labels, labels);
           host.labels.clear();
           host.labels.addAll(labels);
           for (Node node : host.nms.values()) {
             replaceNodeForLabels(node.nodeId, node.labels, labels);
+            replaceLabelsForNode(node.nodeId, node.labels, labels);
             node.labels = null;
+            isNodeLabelFromHost.put(node.nodeId, true);
           }
           break;
         default:
@@ -620,15 +676,18 @@ public class CommonNodeLabelsManager extends AbstractService {
               nm.labels = new HashSet<String>();
             }
             nm.labels.addAll(labels);
+            isNodeLabelFromHost.put(nm.nodeId, false);
             break;
           case REPLACE:
             oldLabels = getLabelsByNode(nodeId);
             replaceNodeForLabels(nodeId, oldLabels, labels);
+            replaceLabelsForNode(nodeId, oldLabels, labels);
             if (nm.labels == null) { 
               nm.labels = new HashSet<String>();
             }
             nm.labels.clear();
             nm.labels.addAll(labels);
+            isNodeLabelFromHost.put(nm.nodeId, false);
             break;
           default:
             break;
@@ -765,8 +824,8 @@ public class CommonNodeLabelsManager extends AbstractService {
 
   @SuppressWarnings("unchecked")
   private <T> Map<NodeId, Set<T>> generateNodeLabelsInfoPerNode(Class<T> type) {
+    readLock.lock();
     try {
-      readLock.lock();
       Map<NodeId, Set<T>> nodeToLabels = new HashMap<>();
       for (Entry<String, Host> entry : nodeCollections.entrySet()) {
         String hostName = entry.getKey();
@@ -808,8 +867,8 @@ public class CommonNodeLabelsManager extends AbstractService {
    * @return set of nodes with no labels
    */
   public Set<NodeId> getNodesWithoutALabel() {
+    readLock.lock();
     try {
-      readLock.lock();
       Set<NodeId> nodes = new HashSet<>();
       for (Host host : nodeCollections.values()) {
         for (NodeId nodeId : host.nms.keySet()) {
@@ -831,8 +890,8 @@ public class CommonNodeLabelsManager extends AbstractService {
    * @return labels to nodes map
    */
   public Map<String, Set<NodeId>> getLabelsToNodes() {
+    readLock.lock();
     try {
-      readLock.lock();
       return getLabelsToNodes(labelCollections.keySet());
     } finally {
       readLock.unlock();
@@ -847,8 +906,8 @@ public class CommonNodeLabelsManager extends AbstractService {
    * @return labels to nodes map
    */
   public Map<String, Set<NodeId>> getLabelsToNodes(Set<String> labels) {
+    readLock.lock();
     try {
-      readLock.lock();
       Map<String, Set<NodeId>> labelsToNodes = getLabelsToNodesMapping(labels,
           String.class);
       return Collections.unmodifiableMap(labelsToNodes);
@@ -864,8 +923,8 @@ public class CommonNodeLabelsManager extends AbstractService {
    * @return labels to nodes map
    */
   public Map<NodeLabel, Set<NodeId>> getLabelsInfoToNodes() {
+    readLock.lock();
     try {
-      readLock.lock();
       return getLabelsInfoToNodes(labelCollections.keySet());
     } finally {
       readLock.unlock();
@@ -881,8 +940,8 @@ public class CommonNodeLabelsManager extends AbstractService {
    * @return labels to nodes map
    */
   public Map<NodeLabel, Set<NodeId>> getLabelsInfoToNodes(Set<String> labels) {
+    readLock.lock();
     try {
-      readLock.lock();
       Map<NodeLabel, Set<NodeId>> labelsToNodes = getLabelsToNodesMapping(
           labels, NodeLabel.class);
       return Collections.unmodifiableMap(labelsToNodes);
@@ -921,8 +980,8 @@ public class CommonNodeLabelsManager extends AbstractService {
    * @return existing valid labels in repository
    */
   public Set<String> getClusterNodeLabelNames() {
+    readLock.lock();
     try {
-      readLock.lock();
       Set<String> labels = new HashSet<String>(labelCollections.keySet());
       labels.remove(NO_LABEL);
       return Collections.unmodifiableSet(labels);
@@ -932,8 +991,8 @@ public class CommonNodeLabelsManager extends AbstractService {
   }
   
   public List<NodeLabel> getClusterNodeLabels() {
+    readLock.lock();
     try {
-      readLock.lock();
       List<NodeLabel> nodeLabels = new ArrayList<>();
       for (RMNodeLabel label : labelCollections.values()) {
         if (!label.getLabelName().equals(NO_LABEL)) {
@@ -951,8 +1010,8 @@ public class CommonNodeLabelsManager extends AbstractService {
     if (nodeLabel.equals(NO_LABEL)) {
       return noNodeLabel.getIsExclusive();
     }
+    readLock.lock();
     try {
-      readLock.lock();
       RMNodeLabel label = labelCollections.get(nodeLabel);
       if (label == null) {
         String message =
@@ -1047,8 +1106,8 @@ public class CommonNodeLabelsManager extends AbstractService {
   }
   
   public Set<NodeLabel> getLabelsInfoByNode(NodeId nodeId) {
+    readLock.lock();
     try {
-      readLock.lock();
       Set<String> labels = getLabelsByNode(nodeId, nodeCollections);
       if (labels.isEmpty()) {
         return EMPTY_NODELABEL_SET;

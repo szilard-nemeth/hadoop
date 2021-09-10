@@ -78,7 +78,7 @@ static __dlsym_ZSTD_isError dlsym_ZSTD_isError;
 static __dlsym_ZSTD_getErrorName dlsym_ZSTD_getErrorName;
 #endif
 
-// Load the libztsd.so from disk
+// Load the libzstd.so from disk
 JNIEXPORT void JNICALL Java_org_apache_hadoop_io_compress_zstd_ZStandardCompressor_initIDs (JNIEnv *env, jclass clazz) {
 #ifdef UNIX
     // Load libzstd.so
@@ -219,13 +219,13 @@ JNIEXPORT jint Java_org_apache_hadoop_io_compress_zstd_ZStandardCompressor_defla
         return (jint) 0;
     }
 
-    bytes_read += input.pos;
+    bytes_read += input.pos - uncompressed_direct_buf_off;
     bytes_written += output.pos;
     (*env)->SetLongField(env, this, ZStandardCompressor_bytesRead, bytes_read);
     (*env)->SetLongField(env, this, ZStandardCompressor_bytesWritten, bytes_written);
 
     (*env)->SetIntField(env, this, ZStandardCompressor_uncompressedDirectBufOff, input.pos);
-    (*env)->SetIntField(env, this, ZStandardCompressor_uncompressedDirectBufLen, input.size - input.pos);
+    (*env)->SetIntField(env, this, ZStandardCompressor_uncompressedDirectBufLen, input.size);
     return (jint) output.pos;
 }
 

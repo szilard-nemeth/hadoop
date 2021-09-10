@@ -55,8 +55,8 @@ import org.apache.hadoop.yarn.client.api.impl.AMRMClientImpl;
 import org.apache.hadoop.yarn.exceptions.YarnException;
 import org.apache.hadoop.yarn.util.resource.Resources;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -465,10 +465,7 @@ extends AbstractService {
 
     int loggingCounter = logInterval;
     do {
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("Check the condition for main loop.");
-      }
-
+      LOG.debug("Check the condition for main loop.");
       boolean result = check.get();
       if (result) {
         LOG.info("Exits the main loop.");

@@ -24,13 +24,12 @@ import com.ctc.wstx.io.SystemId;
 import com.ctc.wstx.stax.WstxInputFactory;
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonGenerator;
-import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
 
 import java.io.BufferedInputStream;
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -41,8 +40,11 @@ import java.io.Writer;
 import java.lang.ref.WeakReference;
 import java.net.InetSocketAddress;
 import java.net.JarURLConnection;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URL;
 import java.net.URLConnection;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -51,7 +53,6 @@ import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
-import java.util.LinkedList;
 import java.util.List;
 import java.util.ListIterator;
 import java.util.Map;
@@ -69,6 +70,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
+import javax.annotation.Nullable;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.stream.XMLInputFactory;
@@ -81,7 +83,7 @@ import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.dom.DOMSource;
 import javax.xml.transform.stream.StreamResult;
 
-import com.google.common.base.Charsets;
+import org.apache.hadoop.thirdparty.com.google.common.base.Charsets;
 import org.apache.commons.collections.map.UnmodifiableMap;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;
@@ -105,8 +107,8 @@ import org.slf4j.LoggerFactory;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 
-import com.google.common.base.Preconditions;
-import com.google.common.base.Strings;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
+import org.apache.hadoop.thirdparty.com.google.common.base.Strings;
 
 import static org.apache.commons.lang3.StringUtils.isBlank;
 import static org.apache.commons.lang3.StringUtils.isNotBlank;
@@ -1025,11 +1027,11 @@ public class Configuration implements Iterable<Map.Entry<String,String>>,
     properties = null;                            // trigger reload
     finalParameters.clear();                      // clear site-limits
   }
-  
+
   private synchronized void addResourceObject(Resource resource) {
     resources.add(resource);                      // add to resources
     restrictSystemProps |= resource.isParserRestricted();
-    reloadConfiguration();
+    loadProps(properties, resources.size() - 1, false);
   }
 
   private static final int MAX_SUBST = 20;
@@ -1137,36 +1139,37 @@ public class Configuration implements Iterable<Map.Entry<String,String>>,
       final String var = eval.substring(varBounds[SUB_START_IDX],
           varBounds[SUB_END_IDX]);
       String val = null;
-      if (!restrictSystemProps) {
-        try {
-          if (var.startsWith("env.") && 4 < var.length()) {
-            String v = var.substring(4);
-            int i = 0;
-            for (; i < v.length(); i++) {
-              char c = v.charAt(i);
-              if (c == ':' && i < v.length() - 1 && v.charAt(i + 1) == '-') {
-                val = getenv(v.substring(0, i));
-                if (val == null || val.length() == 0) {
-                  val = v.substring(i + 2);
-                }
-                break;
-              } else if (c == '-') {
-                val = getenv(v.substring(0, i));
-                if (val == null) {
-                  val = v.substring(i + 1);
-                }
-                break;
+      try {
+        // evaluate system properties or environment variables even when
+        // the configuration is restricted -the restrictions are enforced
+        // in the getenv/getProperty calls
+        if (var.startsWith("env.") && 4 < var.length()) {
+          String v = var.substring(4);
+          int i = 0;
+          for (; i < v.length(); i++) {
+            char c = v.charAt(i);
+            if (c == ':' && i < v.length() - 1 && v.charAt(i + 1) == '-') {
+              val = getenv(v.substring(0, i));
+              if (val == null || val.length() == 0) {
+                val = v.substring(i + 2);
               }
+              break;
+            } else if (c == '-') {
+              val = getenv(v.substring(0, i));
+              if (val == null) {
+                val = v.substring(i + 1);
+              }
+              break;
             }
-            if (i == v.length()) {
-              val = getenv(v);
-            }
-          } else {
-            val = getProperty(var);
           }
-        } catch (SecurityException se) {
-          LOG.warn("Unexpected SecurityException in Configuration", se);
+          if (i == v.length()) {
+            val = getenv(v);
+          }
+        } else {
+          val = getProperty(var);
         }
+      } catch (SecurityException se) {
+        LOG.warn("Unexpected SecurityException in Configuration", se);
       }
       if (val == null) {
         val = getRaw(var);
@@ -1192,13 +1195,33 @@ public class Configuration implements Iterable<Map.Entry<String,String>>,
     throw new IllegalStateException("Variable substitution depth too large: " 
                                     + MAX_SUBST + " " + expr);
   }
-  
+
+  /**
+   * Get the environment variable value if
+   * {@link #restrictSystemProps} does not block this.
+   * @param name environment variable name.
+   * @return the value or null if either it is unset or access forbidden.
+   */
   String getenv(String name) {
-    return System.getenv(name);
+    if (!restrictSystemProps) {
+      return System.getenv(name);
+    } else {
+      return null;
+    }
   }
 
+  /**
+   * Get a system property value if
+   * {@link #restrictSystemProps} does not block this.
+   * @param key property key
+   * @return the value or null if either it is unset or access forbidden.
+   */
   String getProperty(String key) {
-    return System.getProperty(key);
+    if (!restrictSystemProps) {
+      return System.getProperty(key);
+    } else {
+      return null;
+    }
   }
 
   /**
@@ -1690,7 +1713,11 @@ public class Configuration implements Iterable<Map.Entry<String,String>>,
       return true;
     else if (StringUtils.equalsIgnoreCase("false", valueString))
       return false;
-    else return defaultValue;
+    else {
+      LOG.warn("Invalid value for boolean: " + valueString +
+               ", choose default value: " + defaultValue + " for " + name);
+      return defaultValue;
+    }
   }
 
   /** 
@@ -1805,6 +1832,7 @@ public class Configuration implements Iterable<Map.Entry<String,String>>,
    * Return time duration in the given time unit. Valid units are encoded in
    * properties as suffixes: nanoseconds (ns), microseconds (us), milliseconds
    * (ms), seconds (s), minutes (m), hours (h), and days (d).
+   *
    * @param name Property name
    * @param defaultValue Value returned if no mapping exists.
    * @param unit Unit to convert the stored property, if it exists.
@@ -1813,20 +1841,44 @@ public class Configuration implements Iterable<Map.Entry<String,String>>,
    * @return time duration in given time unit
    */
   public long getTimeDuration(String name, long defaultValue, TimeUnit unit) {
-    String vStr = get(name);
-    if (null == vStr) {
-      return defaultValue;
-    } else {
-      return getTimeDurationHelper(name, vStr, unit);
-    }
+    return getTimeDuration(name, defaultValue, unit, unit);
   }
 
   public long getTimeDuration(String name, String defaultValue, TimeUnit unit) {
+    return getTimeDuration(name, defaultValue, unit, unit);
+  }
+
+  /**
+   * Return time duration in the given time unit. Valid units are encoded in
+   * properties as suffixes: nanoseconds (ns), microseconds (us), milliseconds
+   * (ms), seconds (s), minutes (m), hours (h), and days (d). If no unit is
+   * provided, the default unit is applied.
+   *
+   * @param name Property name
+   * @param defaultValue Value returned if no mapping exists.
+   * @param defaultUnit Default time unit if no valid suffix is provided.
+   * @param returnUnit The unit used for the returned value.
+   * @throws NumberFormatException If the property stripped of its unit is not
+   *         a number
+   * @return time duration in given time unit
+   */
+  public long getTimeDuration(String name, long defaultValue,
+      TimeUnit defaultUnit, TimeUnit returnUnit) {
     String vStr = get(name);
     if (null == vStr) {
-      return getTimeDurationHelper(name, defaultValue, unit);
+      return returnUnit.convert(defaultValue, defaultUnit);
     } else {
-      return getTimeDurationHelper(name, vStr, unit);
+      return getTimeDurationHelper(name, vStr, defaultUnit, returnUnit);
+    }
+  }
+
+  public long getTimeDuration(String name, String defaultValue,
+      TimeUnit defaultUnit, TimeUnit returnUnit) {
+    String vStr = get(name);
+    if (null == vStr) {
+      return getTimeDurationHelper(name, defaultValue, defaultUnit, returnUnit);
+    } else {
+      return getTimeDurationHelper(name, vStr, defaultUnit, returnUnit);
     }
   }
 
@@ -1834,26 +1886,41 @@ public class Configuration implements Iterable<Map.Entry<String,String>>,
    * Return time duration in the given time unit. Valid units are encoded in
    * properties as suffixes: nanoseconds (ns), microseconds (us), milliseconds
    * (ms), seconds (s), minutes (m), hours (h), and days (d).
+   *
    * @param name Property name
    * @param vStr The string value with time unit suffix to be converted.
    * @param unit Unit to convert the stored property, if it exists.
    */
   public long getTimeDurationHelper(String name, String vStr, TimeUnit unit) {
+    return getTimeDurationHelper(name, vStr, unit, unit);
+  }
+
+  /**
+   * Return time duration in the given time unit. Valid units are encoded in
+   * properties as suffixes: nanoseconds (ns), microseconds (us), milliseconds
+   * (ms), seconds (s), minutes (m), hours (h), and days (d).
+   *
+   * @param name Property name
+   * @param vStr The string value with time unit suffix to be converted.
+   * @param defaultUnit Unit to convert the stored property, if it exists.
+   * @param returnUnit Unit for the returned value.
+   */
+  private long getTimeDurationHelper(String name, String vStr,
+      TimeUnit defaultUnit, TimeUnit returnUnit) {
     vStr = vStr.trim();
     vStr = StringUtils.toLowerCase(vStr);
     ParsedTimeDuration vUnit = ParsedTimeDuration.unitFor(vStr);
     if (null == vUnit) {
-      logDeprecation("No unit for " + name + "(" + vStr + ") assuming " + unit);
-      vUnit = ParsedTimeDuration.unitFor(unit);
+      vUnit = ParsedTimeDuration.unitFor(defaultUnit);
     } else {
       vStr = vStr.substring(0, vStr.lastIndexOf(vUnit.suffix()));
     }
 
     long raw = Long.parseLong(vStr);
-    long converted = unit.convert(raw, vUnit.unit());
-    if (vUnit.unit().convert(converted, unit) < raw) {
+    long converted = returnUnit.convert(raw, vUnit.unit());
+    if (vUnit.unit().convert(converted, returnUnit) < raw) {
       logDeprecation("Possible loss of precision converting " + vStr
-          + vUnit.suffix() + " to " + unit + " for " + name);
+          + vUnit.suffix() + " to " + returnUnit + " for " + name);
     }
     return converted;
   }
@@ -2830,12 +2897,27 @@ public class Configuration implements Iterable<Map.Entry<String,String>>,
   protected synchronized Properties getProps() {
     if (properties == null) {
       properties = new Properties();
-      Map<String, String[]> backup = updatingResource != null ?
-          new ConcurrentHashMap<String, String[]>(updatingResource) : null;
-      loadResources(properties, resources, quietmode);
+      loadProps(properties, 0, true);
+    }
+    return properties;
+  }
 
+  /**
+   * Loads the resource at a given index into the properties.
+   * @param props the object containing the loaded properties.
+   * @param startIdx the index where the new resource has been added.
+   * @param fullReload flag whether we do complete reload of the conf instead
+   *                   of just loading the new resource.
+   */
+  private synchronized void loadProps(final Properties props,
+      final int startIdx, final boolean fullReload) {
+    if (props != null) {
+      Map<String, String[]> backup =
+          updatingResource != null
+              ? new ConcurrentHashMap<>(updatingResource) : null;
+      loadResources(props, resources, startIdx, fullReload, quietmode);
       if (overlay != null) {
-        properties.putAll(overlay);
+        props.putAll(overlay);
         if (backup != null) {
           for (Map.Entry<Object, Object> item : overlay.entrySet()) {
             String key = (String) item.getKey();
@@ -2847,7 +2929,6 @@ public class Configuration implements Iterable<Map.Entry<String,String>>,
         }
       }
     }
-    return properties;
   }
 
   /**
@@ -2949,14 +3030,16 @@ public class Configuration implements Iterable<Map.Entry<String,String>>,
 
   private void loadResources(Properties properties,
                              ArrayList<Resource> resources,
+                             int startIdx,
+                             boolean fullReload,
                              boolean quiet) {
-    if(loadDefaults) {
+    if(loadDefaults && fullReload) {
       for (String resource : defaultResources) {
         loadResource(properties, new Resource(resource, false), quiet);
       }
     }
     
-    for (int i = 0; i < resources.size(); i++) {
+    for (int i = startIdx; i < resources.size(); i++) {
       Resource ret = loadResource(properties, resources.get(i), quiet);
       if (ret != null) {
         resources.set(i, ret);
@@ -3032,7 +3115,7 @@ public class Configuration implements Iterable<Map.Entry<String,String>>,
           LOG.debug("parsing File " + file);
         }
         reader = (XMLStreamReader2)parse(new BufferedInputStream(
-            new FileInputStream(file)), ((Path)resource).toString(),
+            Files.newInputStream(file.toPath())), ((Path) resource).toString(),
             isRestricted);
       }
     } else if (resource instanceof InputStream) {
@@ -3203,7 +3286,15 @@ public class Configuration implements Iterable<Map.Entry<String,String>>,
           File href = new File(confInclude);
           if (!href.isAbsolute()) {
             // Included resources are relative to the current resource
-            File baseFile = new File(name).getParentFile();
+            File baseFile;
+
+            try {
+              baseFile = new File(new URI(name));
+            } catch (IllegalArgumentException | URISyntaxException e) {
+              baseFile = new File(name);
+            }
+
+            baseFile = baseFile.getParentFile();
             href = new File(baseFile, href.getPath());
           }
           if (!href.exists()) {
@@ -3309,6 +3400,7 @@ public class Configuration implements Iterable<Map.Entry<String,String>>,
         handleStartElement();
         break;
       case XMLStreamConstants.CHARACTERS:
+      case XMLStreamConstants.CDATA:
         if (parseToken) {
           char[] text = reader.getTextCharacters();
           token.append(text, reader.getTextStart(), reader.getTextLength());
@@ -3393,8 +3485,10 @@ public class Configuration implements Iterable<Map.Entry<String,String>>,
   }
 
   private void overlay(Properties to, Properties from) {
-    for (Entry<Object, Object> entry: from.entrySet()) {
-      to.put(entry.getKey(), entry.getValue());
+    synchronized (from) {
+      for (Entry<Object, Object> entry : from.entrySet()) {
+        to.put(entry.getKey(), entry.getValue());
+      }
     }
   }
 
@@ -3470,7 +3564,7 @@ public class Configuration implements Iterable<Map.Entry<String,String>>,
    * </ul>
    * @param out the writer to write to.
    */
-  public void writeXml(String propertyName, Writer out)
+  public void writeXml(@Nullable String propertyName, Writer out)
       throws IOException, IllegalArgumentException {
     Document doc = asXmlDocument(propertyName);
 
@@ -3492,7 +3586,7 @@ public class Configuration implements Iterable<Map.Entry<String,String>>,
   /**
    * Return the XML DOM corresponding to this Configuration.
    */
-  private synchronized Document asXmlDocument(String propertyName)
+  private synchronized Document asXmlDocument(@Nullable String propertyName)
       throws IOException, IllegalArgumentException {
     Document doc;
     try {
@@ -3822,6 +3916,7 @@ public class Configuration implements Iterable<Map.Entry<String,String>>,
     Pattern p = Pattern.compile(regex);
 
     Map<String,String> result = new HashMap<String,String>();
+    List<String> resultKeys = new ArrayList<>();
     Matcher m;
 
     for(Map.Entry<Object,Object> item: getProps().entrySet()) {
@@ -3829,11 +3924,12 @@ public class Configuration implements Iterable<Map.Entry<String,String>>,
           item.getValue() instanceof String) {
         m = p.matcher((String)item.getKey());
         if(m.find()) { // match
-          result.put((String) item.getKey(),
-              substituteVars(getProps().getProperty((String) item.getKey())));
+          resultKeys.add((String) item.getKey());
         }
       }
     }
+    resultKeys.forEach(item ->
+            result.put(item, substituteVars(getProps().getProperty(item))));
     return result;
   }
 

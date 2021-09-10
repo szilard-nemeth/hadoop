@@ -21,7 +21,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Locale;
 
-import com.google.common.base.Preconditions;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -42,7 +42,7 @@ import static org.apache.hadoop.fs.azurebfs.constants.ConfigurationKeys.FS_AZURE
 /**
  * Perform transformation for Azure Active Directory identities used in owner, group and acls.
  */
-public class IdentityTransformer {
+public class IdentityTransformer implements IdentityTransformerInterface {
   private static final Logger LOG = LoggerFactory.getLogger(IdentityTransformer.class);
 
   private boolean isSecure;
@@ -80,60 +80,63 @@ public class IdentityTransformer {
   /**
    * Perform identity transformation for the Get request results in AzureBlobFileSystemStore:
    * getFileStatus(), listStatus(), getAclStatus().
-   * Input originalUserOrGroup can be one of the following:
+   * Input originalIdentity can be one of the following:
+   * <pre>
    * 1. $superuser:
    *     by default it will be transformed to local user/group, this can be disabled by setting
    *     "fs.azure.identity.transformer.skip.superuser.replacement" to true.
    *
    * 2. User principal id:
-   *     can be transformed to localUserOrGroup, if this principal id matches the principal id set in
-   *     "fs.azure.identity.transformer.service.principal.id" and localUserOrGroup is stated in
+   *     can be transformed to localIdentity, if this principal id matches the principal id set in
+   *     "fs.azure.identity.transformer.service.principal.id" and localIdentity is stated in
    *     "fs.azure.identity.transformer.service.principal.substitution.list"
    *
    * 3. User principal name (UPN):
-   *     can be transformed to a short name(localUserOrGroup) if "fs.azure.identity.transformer.enable.short.name"
-   *     is enabled.
-   *
-   * @param originalUserOrGroup the original user or group in the get request results: FileStatus, AclStatus.
-   * @param localUserOrGroup the local user or group, should be parsed from UserGroupInformation.
+   *     can be transformed to a short name(localIdentity) if originalIdentity is owner name, and
+   *     "fs.azure.identity.transformer.enable.short.name" is enabled.
+   * </pre>
+   * @param originalIdentity the original user or group in the get request results: FileStatus, AclStatus.
+   * @param isUserName indicate whether the input originalIdentity is an owner name or owning group name.
+   * @param localIdentity the local user or group, should be parsed from UserGroupInformation.
    * @return owner or group after transformation.
    * */
-  public String transformIdentityForGetRequest(String originalUserOrGroup, String localUserOrGroup) {
-    if (originalUserOrGroup == null) {
-      originalUserOrGroup = localUserOrGroup;
-      // localUserOrGroup might be a full name, so continue the transformation.
+  public String transformIdentityForGetRequest(String originalIdentity, boolean isUserName, String localIdentity)
+      throws IOException {
+    if (originalIdentity == null) {
+      originalIdentity = localIdentity;
+      // localIdentity might be a full name, so continue the transformation.
     }
     // case 1: it is $superuser and replace $superuser config is enabled
-    if (!skipSuperUserReplacement && SUPER_USER.equals(originalUserOrGroup)) {
-      return localUserOrGroup;
+    if (!skipSuperUserReplacement && SUPER_USER.equals(originalIdentity)) {
+      return localIdentity;
     }
 
     if (skipUserIdentityReplacement) {
-      return originalUserOrGroup;
+      return originalIdentity;
     }
 
     // case 2: original owner is principalId set in config, and localUser
     //         is a daemon service specified in substitution list,
     //         To avoid ownership check failure in job task, replace it
     //         to local daemon user/group
-    if (originalUserOrGroup.equals(servicePrincipalId) && isInSubstitutionList(localUserOrGroup)) {
-      return localUserOrGroup;
+    if (originalIdentity.equals(servicePrincipalId) && isInSubstitutionList(localIdentity)) {
+      return localIdentity;
     }
 
     // case 3: If original owner is a fully qualified name, and
     //         short name is enabled, replace with shortName.
-    if (shouldUseShortUserName(originalUserOrGroup)) {
-      return getShortName(originalUserOrGroup);
+    if (isUserName && shouldUseShortUserName(originalIdentity)) {
+      return getShortName(originalIdentity);
     }
 
-    return originalUserOrGroup;
+    return originalIdentity;
   }
 
   /**
    * Perform Identity transformation when setting owner on a path.
    * There are four possible input:
    * 1.short name; 2.$superuser; 3.Fully qualified name; 4. principal id.
-   *
+   * <pre>
    * short name could be transformed to:
    *    - A service principal id or $superuser, if short name belongs a daemon service
    *      stated in substitution list AND "fs.azure.identity.transformer.service.principal.id"
@@ -141,7 +144,7 @@ public class IdentityTransformer {
    *    - Fully qualified name, if "fs.azure.identity.transformer.domain.name" is set in configuration.
    *
    * $superuser, fully qualified name and principalId should not be transformed.
-   *
+   * </pre>
    * @param userOrGroup the user or group to be set as owner.
    * @return user or group after transformation.
    * */
@@ -167,21 +170,21 @@ public class IdentityTransformer {
    * Perform Identity transformation when calling setAcl(),removeAclEntries() and modifyAclEntries()
    * If the AclEntry type is a user or group, and its name is one of the following:
    * 1.short name; 2.$superuser; 3.Fully qualified name; 4. principal id.
+   * <pre>
    * Short name could be transformed to:
    *    - A service principal id or $superuser, if short name belongs a daemon service
    *      stated in substitution list AND "fs.azure.identity.transformer.service.principal.id"
    *      is set with $superuser or a principal id.
    *    - A fully qualified name, if the AclEntry type is User AND if "fs.azure.identity.transformer.domain.name"
-   *    is set in configuration. This is to make the behavior consistent with HDI.
+   *      is set in configuration. This is to make the behavior consistent with HDI.
    *
    * $superuser, fully qualified name and principal id should not be transformed.
-   *
+   * </pre>
    * @param aclEntries list of AclEntry
-   * @return list of AclEntry after the identity transformation.
    * */
-  public List<AclEntry> transformAclEntriesForSetRequest(final List<AclEntry> aclEntries) {
+  public void transformAclEntriesForSetRequest(final List<AclEntry> aclEntries) {
     if (skipUserIdentityReplacement) {
-      return aclEntries;
+      return;
     }
 
     for (int i = 0; i < aclEntries.size(); i++) {
@@ -196,7 +199,7 @@ public class IdentityTransformer {
       if (isInSubstitutionList(name)) {
         transformedName = servicePrincipalId;
       } else if (aclEntry.getType().equals(AclEntryType.USER) // case 2: when the owner is a short name
-              && shouldUseFullyQualifiedUserName(name)) {     //         of the user principal name (UPN).
+          && shouldUseFullyQualifiedUserName(name)) {     //         of the user principal name (UPN).
         // Notice: for group type ACL entry, if name is shortName.
         //         It won't be converted to Full Name. This is
         //         to make the behavior consistent with HDI.
@@ -217,7 +220,64 @@ public class IdentityTransformer {
       // Replace the original AclEntry
       aclEntries.set(i, aclEntryBuilder.build());
     }
-    return aclEntries;
+  }
+
+  /**
+   * Perform Identity transformation when calling GetAclStatus()
+   * If the AclEntry type is a user or group, and its name is one of the following:
+   * <pre>
+   * 1. $superuser:
+   *     by default it will be transformed to local user/group, this can be disabled by setting
+   *     "fs.azure.identity.transformer.skip.superuser.replacement" to true.
+   *
+   * 2. User principal id:
+   *     can be transformed to localUser/localGroup, if this principal id matches the principal id set in
+   *     "fs.azure.identity.transformer.service.principal.id" and localIdentity is stated in
+   *     "fs.azure.identity.transformer.service.principal.substitution.list"
+   *
+   * 3. User principal name (UPN):
+   *     can be transformed to a short name(local identity) if originalIdentity is owner name, and
+   *     "fs.azure.identity.transformer.enable.short.name" is enabled.
+   * </pre>
+   * @param aclEntries list of AclEntry
+   * @param localUser local user name
+   * @param localGroup local primary group
+   * */
+  public void transformAclEntriesForGetRequest(final List<AclEntry> aclEntries, String localUser, String localGroup)
+      throws IOException {
+    if (skipUserIdentityReplacement) {
+      return;
+    }
+
+    for (int i = 0; i < aclEntries.size(); i++) {
+      AclEntry aclEntry = aclEntries.get(i);
+      String name = aclEntry.getName();
+      String transformedName = name;
+      if (name == null || name.isEmpty() || aclEntry.getType().equals(AclEntryType.OTHER) || aclEntry.getType().equals(AclEntryType.MASK)) {
+        continue;
+      }
+
+      // when type of aclEntry is user or group
+      if (aclEntry.getType().equals(AclEntryType.USER)) {
+        transformedName = transformIdentityForGetRequest(name, true, localUser);
+      } else if (aclEntry.getType().equals(AclEntryType.GROUP)) {
+        transformedName = transformIdentityForGetRequest(name, false, localGroup);
+      }
+
+      // Avoid unnecessary new AclEntry allocation
+      if (transformedName.equals(name)) {
+        continue;
+      }
+
+      AclEntry.Builder aclEntryBuilder = new AclEntry.Builder();
+      aclEntryBuilder.setType(aclEntry.getType());
+      aclEntryBuilder.setName(transformedName);
+      aclEntryBuilder.setScope(aclEntry.getScope());
+      aclEntryBuilder.setPermission(aclEntry.getPermission());
+
+      // Replace the original AclEntry
+      aclEntries.set(i, aclEntryBuilder.build());
+    }
   }
 
   /**

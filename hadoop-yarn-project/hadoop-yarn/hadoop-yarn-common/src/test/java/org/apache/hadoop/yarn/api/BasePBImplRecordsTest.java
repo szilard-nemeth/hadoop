@@ -17,15 +17,17 @@
  */
 package org.apache.hadoop.yarn.api;
 
-import com.google.common.collect.Lists;
-import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
 import org.apache.commons.lang3.Range;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.util.Lists;
+import org.apache.hadoop.util.Sets;
 import org.apache.hadoop.yarn.api.resource.PlacementConstraint;
 import org.apache.hadoop.yarn.api.resource.PlacementConstraints;
+
+import org.apache.hadoop.thirdparty.com.google.common.collect.Maps;
+
 import org.junit.Assert;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.*;
 import java.nio.ByteBuffer;
@@ -40,7 +42,8 @@ import static org.apache.hadoop.yarn.api.resource.PlacementConstraints.targetIn;
  * Generic helper class to validate protocol records.
  */
 public class BasePBImplRecordsTest {
-  static final Log LOG = LogFactory.getLog(BasePBImplRecordsTest.class);
+  private static final Logger LOG =
+      LoggerFactory.getLogger(BasePBImplRecordsTest.class);
 
   @SuppressWarnings("checkstyle:visibilitymodifier")
   protected static HashMap<Type, Object> typeValueCache =
@@ -75,6 +78,8 @@ public class BasePBImplRecordsTest {
           'a' + rand.nextInt(26),
           'a' + rand.nextInt(26),
           'a' + rand.nextInt(26));
+    } else if (type.equals(Float.class)) {
+      return rand.nextFloat();
     } else if (type instanceof Class) {
       Class clazz = (Class)type;
       if (clazz.isArray()) {

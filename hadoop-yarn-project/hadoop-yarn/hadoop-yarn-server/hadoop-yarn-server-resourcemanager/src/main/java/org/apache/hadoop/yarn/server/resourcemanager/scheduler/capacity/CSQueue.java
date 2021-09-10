@@ -51,7 +51,7 @@ import org.apache.hadoop.yarn.server.resourcemanager.scheduler.common.fica.FiCaS
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.common.fica.FiCaSchedulerNode;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.placement.CandidateNodeSet;
 
-import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
 
 /**
  * <code>CSQueue</code> represents a node in the tree of 
@@ -73,10 +73,16 @@ public interface CSQueue extends SchedulerQueue<CSQueue> {
   public void setParent(CSQueue newParentQueue);
 
   /**
-   * Get the queue name.
+   * Get the queue's internal reference name.
    * @return the queue name
    */
   public String getQueueName();
+
+  /**
+   * Get the queue's legacy name.
+   * @return the queue name
+   */
+  String getQueueShortName();
 
   /**
    * Get the full name of the queue, including the heirarchy.
@@ -145,6 +151,12 @@ public interface CSQueue extends SchedulerQueue<CSQueue> {
    * @return current run-state
    */
   public QueueState getState();
+
+  /**
+   * Get the max-parallel-applications property of the queue
+   * @return max-parallel-applications
+   */
+  public int getMaxParallelApps();
   
   /**
    * Get child queues
@@ -175,6 +187,15 @@ public interface CSQueue extends SchedulerQueue<CSQueue> {
    */
   public void submitApplicationAttempt(FiCaSchedulerApp application,
       String userName);
+
+  /**
+   * Submit an application attempt to the queue.
+   * @param application application whose attempt is being submitted
+   * @param userName user who submitted the application attempt
+   * @param isMoveApp is application being moved across the queue
+   */
+  public void submitApplicationAttempt(FiCaSchedulerApp application,
+      String userName, boolean isMoveApp);
 
   /**
    * An application submitted to this queue has finished.
@@ -440,4 +461,26 @@ public interface CSQueue extends SchedulerQueue<CSQueue> {
    * @return policy name
    */
   String getMultiNodeSortingPolicyName();
+
+  /**
+   * Get the maximum lifetime in seconds of an application which is submitted to
+   * this queue. Apps can set their own lifetime timeout up to this value.
+   * @return max lifetime in seconds
+   */
+  long getMaximumApplicationLifetime();
+
+  /**
+   * Get the default lifetime in seconds of an application which is submitted to
+   * this queue. If an app doesn't specify its own timeout when submitted, this
+   * value will be used.
+   * @return default app lifetime
+   */
+  long getDefaultApplicationLifetime();
+
+  /**
+   * Get the indicator of whether or not the default application lifetime was
+   * set by a config property or was calculated by the capacity scheduler.
+   * @return indicator whether set or calculated
+   */
+  boolean getDefaultAppLifetimeWasSpecifiedInConfig();
 }

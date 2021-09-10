@@ -20,7 +20,7 @@
 
 package org.apache.hadoop.yarn.server.nodemanager.containermanager.linux.resources;
 
-import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;
 import org.apache.hadoop.conf.Configuration;
@@ -84,9 +84,7 @@ public class ResourceHandlerModule {
         if (cGroupsHandler == null) {
           cGroupsHandler = new CGroupsHandlerImpl(conf,
               PrivilegedOperationExecutor.getInstance(conf));
-          if (LOG.isDebugEnabled()) {
-            LOG.debug("Value of CGroupsHandler is: " + cGroupsHandler);
-          }
+          LOG.debug("Value of CGroupsHandler is: {}", cGroupsHandler);
         }
       }
     }
@@ -318,16 +316,12 @@ public class ResourceHandlerModule {
 
     Map<String, ResourcePlugin> pluginMap = pluginManager.getNameToPlugins();
     if (pluginMap == null) {
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("List of plugins of ResourcePluginManager was empty " +
-            "while trying to add ResourceHandlers from configuration!");
-      }
+      LOG.debug("List of plugins of ResourcePluginManager was empty " +
+          "while trying to add ResourceHandlers from configuration!");
       return;
     } else {
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("List of plugins of ResourcePluginManager: " +
-            pluginManager.getNameToPlugins());
-      }
+      LOG.debug("List of plugins of ResourcePluginManager: {}",
+          pluginManager.getNameToPlugins());
     }
 
     for (ResourcePlugin plugin : pluginMap.values()) {

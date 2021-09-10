@@ -157,10 +157,16 @@ class CapacitySchedulerPage extends RmView {
           : resourceUsages.getAmUsed();
       ri.
           __("Used Capacity:",
-              appendPercent(resourceUsages.getUsed().toString(),
+              appendPercent(resourceUsages.getUsed(),
                   capacities.getUsedCapacity() / 100))
-          .__("Configured Capacity:",
-              capacities.getConfiguredMinResource().toString())
+          .__(capacities.getWeight() != -1 ?
+              "Configured Weight:" :
+                  "Configured Capacity:",
+              capacities.getWeight() != -1 ?
+                  capacities.getWeight() :
+                  capacities.getConfiguredMinResource() == null ?
+                  Resources.none().toString() :
+                  capacities.getConfiguredMinResource().toString())
           .__("Configured Max Capacity:",
               (capacities.getConfiguredMaxResource() == null
                   || capacities.getConfiguredMaxResource().getResource()
@@ -168,10 +174,10 @@ class CapacitySchedulerPage extends RmView {
                           ? "unlimited"
                           : capacities.getConfiguredMaxResource().toString())
           .__("Effective Capacity:",
-              appendPercent(capacities.getEffectiveMinResource().toString(),
+              appendPercent(capacities.getEffectiveMinResource(),
                   capacities.getCapacity() / 100))
           .__("Effective Max Capacity:",
-              appendPercent(capacities.getEffectiveMaxResource().toString(),
+              appendPercent(capacities.getEffectiveMaxResource(),
                   capacities.getMaxCapacity() / 100))
           .__("Absolute Used Capacity:",
               percent(capacities.getAbsoluteUsedCapacity() / 100))
@@ -191,15 +197,22 @@ class CapacitySchedulerPage extends RmView {
 
     private void renderCommonLeafQueueInfo(ResponseInfo ri) {
       ri.
-          __("Num Schedulable Applications:", Integer.toString(lqinfo.getNumActiveApplications())).
-          __("Num Non-Schedulable Applications:", Integer.toString(lqinfo.getNumPendingApplications())).
-          __("Num Containers:", Integer.toString(lqinfo.getNumContainers())).
-          __("Max Applications:", Integer.toString(lqinfo.getMaxApplications())).
-          __("Max Applications Per User:", Integer.toString(lqinfo.getMaxApplicationsPerUser())).
-          __("Configured Minimum User Limit Percent:", Integer.toString(lqinfo.getUserLimit()) + "%").
+          __("Num Schedulable Applications:",
+              Integer.toString(lqinfo.getNumActiveApplications())).
+          __("Num Non-Schedulable Applications:",
+              Integer.toString(lqinfo.getNumPendingApplications())).
+          __("Num Containers:",
+              Integer.toString(lqinfo.getNumContainers())).
+          __("Max Applications:",
+              Integer.toString(lqinfo.getMaxApplications())).
+          __("Max Applications Per User:",
+              Integer.toString(lqinfo.getMaxApplicationsPerUser())).
+          __("Configured Minimum User Limit Percent:",
+              lqinfo.getUserLimit() + "%").
           __("Configured User Limit Factor:", lqinfo.getUserLimitFactor()).
-          __("Accessible Node Labels:", StringUtils.join(",", lqinfo.getNodeLabels())).
-          __("Ordering Policy: ", lqinfo.getOrderingPolicyInfo()).
+          __("Accessible Node Labels:",
+              StringUtils.join(",", lqinfo.getNodeLabels())).
+          __("Ordering Policy: ", lqinfo.getOrderingPolicyDisplayName()).
           __("Preemption:",
               lqinfo.getPreemptionDisabled() ? "disabled" : "enabled").
           __("Intra-queue Preemption:", lqinfo.getIntraQueuePreemptionDisabled()
@@ -320,6 +333,8 @@ class CapacitySchedulerPage extends RmView {
         boolean isAutoCreatedLeafQueue = info.isLeafQueue() ?
             ((CapacitySchedulerLeafQueueInfo) info).isAutoCreatedLeafQueue()
             : false;
+        float capPercent = absMaxCap == 0 ? 0 : absCap/absMaxCap;
+        float usedCapPercent = absMaxCap == 0 ? 0 : absUsedCap/absMaxCap;
 
         String Q_WIDTH = width(absMaxCap * Q_MAX_WIDTH);
         LI<UL<Hamlet>> li = ul.
@@ -328,9 +343,9 @@ class CapacitySchedulerPage extends RmView {
             Q_WIDTH)
             :  Q_WIDTH).
               $title(join("Absolute Capacity:", percent(absCap))).
-              span().$style(join(Q_GIVEN, ";font-size:1px;", width(absCap/absMaxCap))).
+              span().$style(join(Q_GIVEN, ";font-size:1px;", width(capPercent))).
             __('.').__().
-              span().$style(join(width(absUsedCap/absMaxCap),
+              span().$style(join(width(usedCapPercent),
                 ";font-size:1px;left:0%;", absUsedCap > absCap ? Q_OVER : Q_UNDER)).
             __('.').__().
               span(".q", "Queue: "+info.getQueuePath().substring(5)).__().
@@ -647,7 +662,9 @@ class CapacitySchedulerPage extends RmView {
           "      q = q.substr(q.lastIndexOf(':') + 2);",
           "      q = '^' + q.substr(q.lastIndexOf('.') + 1) + '$';",
           "    }",
-          "    $('#apps').dataTable().fnFilter(q, 4, true);",
+          // Update this filter column index for queue if new columns are added
+          // Current index for queue column is 5
+          "    $('#apps').dataTable().fnFilter(q, 5, true);",
           "  });",
           "  $('#cs').show();",
           "});").__().
@@ -658,8 +675,12 @@ class CapacitySchedulerPage extends RmView {
     return QueuesBlock.class;
   }
 
-  static String appendPercent(String message, float f) {
-    return message + " (" + StringUtils.formatPercent(f, 1) + ")";
+  static String appendPercent(ResourceInfo resourceInfo, float f) {
+    if (resourceInfo == null) {
+      return "";
+    }
+    return resourceInfo.toString() + " ("
+        + StringUtils.formatPercent(f, 1) + ")";
   }
 
   static String percent(float f) {

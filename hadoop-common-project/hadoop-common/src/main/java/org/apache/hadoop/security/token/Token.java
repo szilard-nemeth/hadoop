@@ -18,9 +18,8 @@
 
 package org.apache.hadoop.security.token;
 
-import com.google.common.collect.Maps;
-import com.google.protobuf.ByteString;
-import com.google.common.primitives.Bytes;
+import org.apache.hadoop.thirdparty.com.google.common.collect.Maps;
+import org.apache.hadoop.thirdparty.com.google.common.primitives.Bytes;
 
 import org.apache.commons.codec.binary.Base64;
 import org.apache.hadoop.HadoopIllegalArgumentException;
@@ -28,13 +27,12 @@ import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.*;
-import org.apache.hadoop.security.proto.SecurityProtos.TokenProto;
 import org.apache.hadoop.util.ReflectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.*;
-import java.util.Arrays;
+import java.security.MessageDigest;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.ServiceConfigurationError;
@@ -56,7 +54,6 @@ public class Token<T extends TokenIdentifier> implements Writable {
   private Text kind;
   private Text service;
   private TokenRenewer renewer;
-  private byte[] dnHandshakeSecret;
 
   /**
    * Construct a token given a token identifier and a secret manager for the
@@ -69,7 +66,14 @@ public class Token<T extends TokenIdentifier> implements Writable {
     identifier = id.getBytes();
     kind = id.getKind();
     service = new Text();
-    dnHandshakeSecret = new byte[0];
+  }
+
+  public void setID(byte[] bytes) {
+    identifier = bytes;
+  }
+
+  public void setPassword(byte[] newPassword) {
+    password = newPassword;
   }
 
   /**
@@ -84,7 +88,6 @@ public class Token<T extends TokenIdentifier> implements Writable {
     this.password = (password == null)? new byte[0] : password;
     this.kind = (kind == null)? new Text() : kind;
     this.service = (service == null)? new Text() : service;
-    this.dnHandshakeSecret = new byte[0];
   }
 
   /**
@@ -95,7 +98,6 @@ public class Token<T extends TokenIdentifier> implements Writable {
     password = new byte[0];
     kind = new Text();
     service = new Text();
-    dnHandshakeSecret = new byte[0];
   }
 
   /**
@@ -107,38 +109,10 @@ public class Token<T extends TokenIdentifier> implements Writable {
     this.password = other.password.clone();
     this.kind = new Text(other.kind);
     this.service = new Text(other.service);
-    this.dnHandshakeSecret = other.dnHandshakeSecret.clone();
   }
 
   public Token<T> copyToken() {
     return new Token<T>(this);
-  }
-
-  /**
-   * Construct a Token from a TokenProto.
-   * @param tokenPB the TokenProto object
-   */
-  public Token(TokenProto tokenPB) {
-    this.identifier = tokenPB.getIdentifier().toByteArray();
-    this.password = tokenPB.getPassword().toByteArray();
-    this.kind = new Text(tokenPB.getKindBytes().toByteArray());
-    this.service = new Text(tokenPB.getServiceBytes().toByteArray());
-    this.dnHandshakeSecret = new byte[0];
-  }
-
-  /**
-   * Construct a TokenProto from this Token instance.
-   * @return a new TokenProto object holding copies of data in this instance
-   */
-  public TokenProto toTokenProto() {
-    return TokenProto.newBuilder().
-        setIdentifier(ByteString.copyFrom(this.getIdentifier())).
-        setPassword(ByteString.copyFrom(this.getPassword())).
-        setKindBytes(ByteString.copyFrom(
-            this.getKind().getBytes(), 0, this.getKind().getLength())).
-        setServiceBytes(ByteString.copyFrom(
-            this.getService().getBytes(), 0, this.getService().getLength())).
-        build();
   }
 
   /**
@@ -147,14 +121,6 @@ public class Token<T extends TokenIdentifier> implements Writable {
    */
   public byte[] getIdentifier() {
     return identifier;
-  }
-
-  public byte[] getDnHandshakeSecret() {
-    return dnHandshakeSecret;
-  }
-
-  public void setDNHandshakeSecret(byte[] secret) {
-    this.dnHandshakeSecret = secret;
   }
 
   private static Class<? extends TokenIdentifier>
@@ -351,11 +317,6 @@ public class Token<T extends TokenIdentifier> implements Writable {
     in.readFully(password);
     kind.readFields(in);
     service.readFields(in);
-    len = WritableUtils.readVInt(in);
-    if (dnHandshakeSecret == null || dnHandshakeSecret.length != len) {
-      dnHandshakeSecret = new byte[len];
-    }
-    in.readFully(dnHandshakeSecret);
   }
 
   @Override
@@ -366,8 +327,6 @@ public class Token<T extends TokenIdentifier> implements Writable {
     out.write(password);
     kind.write(out);
     service.write(out);
-    WritableUtils.writeVInt(out, dnHandshakeSecret.length);
-    out.write(dnHandshakeSecret);
   }
 
   /**
@@ -432,8 +391,8 @@ public class Token<T extends TokenIdentifier> implements Writable {
       return false;
     } else {
       Token<T> r = (Token<T>) right;
-      return Arrays.equals(identifier, r.identifier) &&
-             Arrays.equals(password, r.password) &&
+      return MessageDigest.isEqual(identifier, r.identifier) &&
+             MessageDigest.isEqual(password, r.password) &&
              kind.equals(r.kind) &&
              service.equals(r.service);
     }

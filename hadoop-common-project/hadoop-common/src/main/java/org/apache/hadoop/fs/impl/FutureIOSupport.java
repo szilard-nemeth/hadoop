@@ -21,6 +21,8 @@ package org.apache.hadoop.fs.impl;
 import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
@@ -30,9 +32,16 @@ import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FSBuilder;
+import org.apache.hadoop.util.functional.CallableRaisingIOE;
+import org.apache.hadoop.util.functional.FutureIO;
 
 /**
  * Support for future IO and the FS Builder subclasses.
+ * If methods in here are needed for applications, promote
+ * to {@link FutureIO} for public use -with the original
+ * method relaying to it. This is to ensure that external
+ * filesystem implementations can safely use these methods
+ * without linkage problems surfacing.
  */
 @InterfaceAudience.Private
 @InterfaceStability.Unstable
@@ -51,16 +60,9 @@ public final class FutureIOSupport {
    * @throws IOException if something went wrong
    * @throws RuntimeException any nested RTE thrown
    */
-  public static <T> T awaitFuture(final Future<T> future)
+  public static <T> T  awaitFuture(final Future<T> future)
       throws InterruptedIOException, IOException, RuntimeException {
-    try {
-      return future.get();
-    } catch (InterruptedException e) {
-      throw (InterruptedIOException)new InterruptedIOException(e.toString())
-          .initCause(e);
-    } catch (ExecutionException e) {
-      return raiseInnerCause(e);
-    }
+    return FutureIO.awaitFuture(future);
   }
 
 
@@ -80,17 +82,8 @@ public final class FutureIOSupport {
       final TimeUnit unit)
       throws InterruptedIOException, IOException, RuntimeException,
       TimeoutException {
-
-    try {
-      return future.get(timeout, unit);
-    } catch (InterruptedException e) {
-      throw (InterruptedIOException)new InterruptedIOException(e.toString())
-          .initCause(e);
-    } catch (ExecutionException e) {
-      return raiseInnerCause(e);
-    }
+    return FutureIO.awaitFuture(future, timeout, unit);
   }
-
 
   /**
    * From the inner cause of an execution exception, extract the inner cause
@@ -108,32 +101,33 @@ public final class FutureIOSupport {
    */
   public static <T> T raiseInnerCause(final ExecutionException e)
       throws IOException {
-    Throwable cause = e.getCause();
-    if (cause instanceof IOException) {
-      throw (IOException) cause;
-    } else if (cause instanceof WrappedIOException){
-      throw ((WrappedIOException) cause).getCause();
-    } else if (cause instanceof RuntimeException){
-      throw (RuntimeException) cause;
-    } else if (cause != null) {
-      // other type: wrap with a new IOE
-      throw new IOException(cause);
-    } else {
-      // this only happens if somebody deliberately raises
-      // an ExecutionException
-      throw new IOException(e);
-    }
+    return FutureIO.raiseInnerCause(e);
+  }
+
+  /**
+   * Extract the cause of a completion failure and rethrow it if an IOE
+   * or RTE.
+   * @param e exception.
+   * @param <T> type of return value.
+   * @return nothing, ever.
+   * @throws IOException either the inner IOException, or a wrapper around
+   * any non-Runtime-Exception
+   * @throws RuntimeException if that is the inner cause.
+   */
+  public static <T> T raiseInnerCause(final CompletionException e)
+      throws IOException {
+    return FutureIO.raiseInnerCause(e);
   }
 
   /**
    * Propagate options to any builder, converting everything with the
    * prefix to an option where, if there were 2+ dot-separated elements,
    * it is converted to a schema.
-   * <pre>
+   * <pre>{@code
    *   fs.example.s3a.option => s3a:option
    *   fs.example.fs.io.policy => s3a.io.policy
    *   fs.example.something => something
-   * </pre>
+   * }</pre>
    * @param builder builder to modify
    * @param conf configuration to read
    * @param optionalPrefix prefix for optional settings
@@ -159,11 +153,11 @@ public final class FutureIOSupport {
    * Propagate options to any builder, converting everything with the
    * prefix to an option where, if there were 2+ dot-separated elements,
    * it is converted to a schema.
-   * <pre>
+   * <pre>{@code
    *   fs.example.s3a.option => s3a:option
    *   fs.example.fs.io.policy => s3a.io.policy
    *   fs.example.something => something
-   * </pre>
+   * }</pre>
    * @param builder builder to modify
    * @param conf configuration to read
    * @param prefix prefix to scan/strip
@@ -187,5 +181,30 @@ public final class FutureIOSupport {
         builder.opt(key, val);
       }
     }
+  }
+
+  /**
+   * Evaluate a CallableRaisingIOE in the current thread,
+   * converting IOEs to RTEs and propagating.
+   * @param callable callable to invoke
+   * @param <T> Return type.
+   * @return the evaluated result.
+   * @throws UnsupportedOperationException fail fast if unsupported
+   * @throws IllegalArgumentException invalid argument
+   */
+  public static <T> CompletableFuture<T> eval(
+      CallableRaisingIOE<T> callable) {
+    CompletableFuture<T> result = new CompletableFuture<>();
+    try {
+      result.complete(callable.apply());
+    } catch (UnsupportedOperationException | IllegalArgumentException tx) {
+      // fail fast here
+      throw tx;
+    } catch (Throwable tx) {
+      // fail lazily here to ensure callers expect all File IO operations to
+      // surface later
+      result.completeExceptionally(tx);
+    }
+    return result;
   }
 }

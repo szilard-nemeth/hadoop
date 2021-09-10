@@ -16,17 +16,26 @@
 
 <!-- MACRO{toc|fromDepth=1|toDepth=3} -->
 
+See also:
+
+* [ABFS](./abfs.html)
+* [Testing](./testing_azure.html)
+
 ## Introduction
 
-The hadoop-azure module provides support for integration with
+The `hadoop-azure` module provides support for integration with
 [Azure Blob Storage](http://azure.microsoft.com/en-us/documentation/services/storage/).
-The built jar file, named hadoop-azure.jar, also declares transitive dependencies
+The built jar file, named `hadoop-azure.jar`, also declares transitive dependencies
 on the additional artifacts it requires, notably the
 [Azure Storage SDK for Java](https://github.com/Azure/azure-storage-java).
 
 To make it part of Apache Hadoop's default classpath, simply make sure that
-HADOOP_OPTIONAL_TOOLS in hadoop-env.sh has 'hadoop-azure' in the list.
+`HADOOP_OPTIONAL_TOOLS`in `hadoop-env.sh` has `'hadoop-azure` in the list.
+Example:
 
+```bash
+export HADOOP_OPTIONAL_TOOLS="hadoop-azure,hadoop-azure-datalake"
+```
 ## Features
 
 * Read and write data stored in an Azure Blob Storage account.
@@ -535,6 +544,17 @@ The maximum number of entries that that cache can hold can be customized using t
       <value>true</value>
     </property>
 ```
+
+### Performance optimization configurations
+
+`fs.azure.block.blob.buffered.pread.disable`: By default the positional read API will do a
+seek and read on input stream. This read will fill the buffer cache in
+BlockBlobInputStream. If this configuration is true it will skip usage of buffer and do a
+lock free call for reading from blob. This optimization is very much helpful for HBase kind
+of short random read over a shared InputStream instance.
+Note: This is not a config which can be set at cluster level. It can be used as
+an option on FutureDataInputStreamBuilder.
+See FileSystem#openFile(Path path)
 
 ## Further Reading
 

@@ -18,9 +18,9 @@
 
 package org.apache.hadoop.yarn.server.resourcemanager.scheduler.placement;
 
-import org.apache.commons.collections.IteratorUtils;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.yarn.server.resourcemanager.scheduler.activities.DiagnosticsCollector;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.hadoop.yarn.api.records.ResourceRequest;
 import org.apache.hadoop.yarn.api.records.SchedulingRequest;
 import org.apache.hadoop.yarn.exceptions.SchedulerInvalidResoureRequestException;
@@ -31,16 +31,15 @@ import org.apache.hadoop.yarn.server.resourcemanager.scheduler.NodeType;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.ResourceScheduler;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.SchedulerNode;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.capacity.SchedulingMode;
-import org.apache.hadoop.yarn.server.resourcemanager.scheduler.common.ApplicationSchedulingConfig;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.common.ContainerRequest;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.common.PendingAsk;
 import org.apache.hadoop.yarn.server.scheduler.SchedulerRequestKey;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
@@ -51,15 +50,13 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
  */
 public class LocalityAppPlacementAllocator <N extends SchedulerNode>
     extends AppPlacementAllocator<N> {
-  private static final Log LOG =
-      LogFactory.getLog(LocalityAppPlacementAllocator.class);
+  private static final Logger LOG =
+      LoggerFactory.getLogger(LocalityAppPlacementAllocator.class);
 
   private final Map<String, ResourceRequest> resourceRequestMap =
       new ConcurrentHashMap<>();
   private volatile String primaryRequestedPartition =
       RMNodeLabelsManager.NO_LABEL;
-  private MultiNodeSortingManager<N> multiNodeSortingManager = null;
-  private String multiNodeSortPolicyName;
 
   private final ReentrantReadWriteLock.ReadLock readLock;
   private final ReentrantReadWriteLock.WriteLock writeLock;
@@ -75,40 +72,6 @@ public class LocalityAppPlacementAllocator <N extends SchedulerNode>
   public void initialize(AppSchedulingInfo appSchedulingInfo,
       SchedulerRequestKey schedulerRequestKey, RMContext rmContext) {
     super.initialize(appSchedulingInfo, schedulerRequestKey, rmContext);
-    multiNodeSortPolicyName = appSchedulingInfo
-        .getApplicationSchedulingEnvs().get(
-            ApplicationSchedulingConfig.ENV_MULTI_NODE_SORTING_POLICY_CLASS);
-    multiNodeSortingManager = (MultiNodeSortingManager<N>) rmContext
-        .getMultiNodeSortingManager();
-    if (LOG.isDebugEnabled()) {
-      LOG.debug(
-          "nodeLookupPolicy used for " + appSchedulingInfo
-              .getApplicationId()
-              + " is " + ((multiNodeSortPolicyName != null) ?
-              multiNodeSortPolicyName :
-              ""));
-    }
-  }
-
-  @Override
-  @SuppressWarnings("unchecked")
-  public Iterator<N> getPreferredNodeIterator(
-      CandidateNodeSet<N> candidateNodeSet) {
-    // Now only handle the case that single node in the candidateNodeSet
-    // TODO, Add support to multi-hosts inside candidateNodeSet which is passed
-    // in.
-
-    N singleNode = CandidateNodeSetUtils.getSingleNode(candidateNodeSet);
-    if (singleNode != null) {
-      return IteratorUtils.singletonIterator(singleNode);
-    }
-
-    // singleNode will be null if Multi-node placement lookup is enabled, and
-    // hence could consider sorting policies.
-    return multiNodeSortingManager.getMultiNodeSortIterator(
-        candidateNodeSet.getAllNodes().values(),
-        candidateNodeSet.getPartition(),
-        multiNodeSortPolicyName);
   }
 
   private boolean hasRequestLabelChanged(ResourceRequest requestOne,
@@ -155,9 +118,9 @@ public class LocalityAppPlacementAllocator <N extends SchedulerNode>
   public PendingAskUpdateResult updatePendingAsk(
       Collection<ResourceRequest> requests,
       boolean recoverPreemptedRequestForAContainer) {
-    try {
-      this.writeLock.lock();
 
+    this.writeLock.lock();
+    try {
       PendingAskUpdateResult updateResult = null;
 
       // Update resource requests
@@ -228,8 +191,8 @@ public class LocalityAppPlacementAllocator <N extends SchedulerNode>
 
   @Override
   public PendingAsk getPendingAsk(String resourceName) {
+    readLock.lock();
     try {
-      readLock.lock();
       ResourceRequest request = getResourceRequest(resourceName);
       if (null == request) {
         return PendingAsk.ZERO;
@@ -245,8 +208,8 @@ public class LocalityAppPlacementAllocator <N extends SchedulerNode>
 
   @Override
   public int getOutstandingAsksCount(String resourceName) {
+    readLock.lock();
     try {
-      readLock.lock();
       ResourceRequest request = getResourceRequest(resourceName);
       if (null == request) {
         return 0;
@@ -353,8 +316,8 @@ public class LocalityAppPlacementAllocator <N extends SchedulerNode>
 
   @Override
   public boolean canAllocate(NodeType type, SchedulerNode node) {
+    readLock.lock();
     try {
-      readLock.lock();
       ResourceRequest r = resourceRequestMap.get(
           ResourceRequest.ANY);
       if (r == null || r.getNumContainers() <= 0) {
@@ -381,8 +344,8 @@ public class LocalityAppPlacementAllocator <N extends SchedulerNode>
 
   @Override
   public boolean canDelayTo(String resourceName) {
+    readLock.lock();
     try {
-      readLock.lock();
       ResourceRequest request = getResourceRequest(resourceName);
       return request == null || request.getRelaxLocality();
     } finally {
@@ -391,15 +354,15 @@ public class LocalityAppPlacementAllocator <N extends SchedulerNode>
 
   }
 
+
   @Override
   public boolean precheckNode(SchedulerNode schedulerNode,
-      SchedulingMode schedulingMode) {
+      SchedulingMode schedulingMode,
+      Optional<DiagnosticsCollector> dcOpt) {
     // We will only look at node label = nodeLabelToLookAt according to
     // schedulingMode and partition of node.
-    if(LOG.isDebugEnabled()) {
-      LOG.debug("precheckNode is invoked for " + schedulerNode.getNodeID() + ","
-          + schedulingMode);
-    }
+    LOG.debug("precheckNode is invoked for {},{}", schedulerNode.getNodeID(),
+        schedulingMode);
     String nodePartitionToLookAt;
     if (schedulingMode == SchedulingMode.RESPECT_PARTITION_EXCLUSIVITY) {
       nodePartitionToLookAt = schedulerNode.getPartition();
@@ -407,7 +370,18 @@ public class LocalityAppPlacementAllocator <N extends SchedulerNode>
       nodePartitionToLookAt = RMNodeLabelsManager.NO_LABEL;
     }
 
-    return primaryRequestedPartition.equals(nodePartitionToLookAt);
+    boolean rst = primaryRequestedPartition.equals(nodePartitionToLookAt);
+    if (!rst && dcOpt.isPresent()) {
+      dcOpt.get().collectPartitionDiagnostics(primaryRequestedPartition,
+          nodePartitionToLookAt);
+    }
+    return rst;
+  }
+
+  @Override
+  public boolean precheckNode(SchedulerNode schedulerNode,
+      SchedulingMode schedulingMode) {
+    return precheckNode(schedulerNode, schedulingMode, Optional.empty());
   }
 
   @Override
@@ -432,8 +406,8 @@ public class LocalityAppPlacementAllocator <N extends SchedulerNode>
   @Override
   public ContainerRequest allocate(SchedulerRequestKey schedulerKey,
       NodeType type, SchedulerNode node) {
+    writeLock.lock();
     try {
-      writeLock.lock();
 
       List<ResourceRequest> resourceRequests = new ArrayList<>();
 

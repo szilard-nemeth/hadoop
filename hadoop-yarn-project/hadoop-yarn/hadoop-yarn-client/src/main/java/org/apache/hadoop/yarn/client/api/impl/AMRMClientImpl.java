@@ -40,6 +40,7 @@ import org.apache.hadoop.classification.InterfaceStability.Unstable;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.ipc.RPC;
+import org.apache.hadoop.net.Node;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.yarn.api.ApplicationMasterProtocol;
 import org.apache.hadoop.yarn.api.protocolrecords.AllocateRequest;
@@ -78,9 +79,9 @@ import org.apache.hadoop.yarn.exceptions.YarnRuntimeException;
 import org.apache.hadoop.yarn.security.AMRMTokenIdentifier;
 import org.apache.hadoop.yarn.util.RackResolver;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Joiner;
-import com.google.common.base.Preconditions;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.base.Joiner;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
 import org.apache.hadoop.yarn.util.resource.Resources;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -763,10 +764,11 @@ public class AMRMClientImpl<T extends ContainerRequest> extends AMRMClient<T> {
   private Set<String> resolveRacks(List<String> nodes) {
     Set<String> racks = new HashSet<String>();    
     if (nodes != null) {
-      for (String node : nodes) {
+      List<Node> tmpList = RackResolver.resolve(nodes);
+      for (Node node : tmpList) {
+        String rack = node.getNetworkLocation();
         // Ensure node requests are accompanied by requests for
         // corresponding rack
-        String rack = RackResolver.resolve(node).getNetworkLocation();
         if (rack == null) {
           LOG.warn("Failed to resolve rack for node " + node + ".");
         } else {
@@ -774,7 +776,6 @@ public class AMRMClientImpl<T extends ContainerRequest> extends AMRMClient<T> {
         }
       }
     }
-    
     return racks;
   }
 

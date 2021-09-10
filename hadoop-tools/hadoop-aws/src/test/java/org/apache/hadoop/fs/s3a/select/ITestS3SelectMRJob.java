@@ -19,19 +19,21 @@
 package org.apache.hadoop.fs.s3a.select;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.concurrent.atomic.AtomicLong;
 
+import org.apache.hadoop.fs.s3a.impl.ChangeDetectionPolicy;
+import org.apache.hadoop.fs.s3a.impl.ChangeDetectionPolicy.Source;
+import org.junit.Assume;
 import org.junit.Test;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.examples.WordCount;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.impl.FutureIOSupport;
-import org.apache.hadoop.fs.impl.WrappedIOException;
 import org.apache.hadoop.fs.s3a.S3AFileSystem;
 import org.apache.hadoop.fs.s3a.S3ATestUtils;
 import org.apache.hadoop.fs.s3a.S3AUtils;
-import org.apache.hadoop.fs.s3a.commit.DurationInfo;
 import org.apache.hadoop.fs.s3a.commit.files.SuccessData;
 import org.apache.hadoop.fs.s3a.commit.staging.StagingCommitter;
 import org.apache.hadoop.io.IOUtils;
@@ -41,6 +43,7 @@ import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapreduce.Job;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
+import org.apache.hadoop.util.DurationInfo;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.apache.hadoop.yarn.server.MiniYARNCluster;
 
@@ -90,6 +93,13 @@ public class ITestS3SelectMRJob extends AbstractS3SelectTest {
   public void setup() throws Exception {
     super.setup();
     fs = S3ATestUtils.createTestFileSystem(conf);
+
+    ChangeDetectionPolicy changeDetectionPolicy =
+        getLandsatFS().getChangeDetectionPolicy();
+    Assume.assumeFalse("the standard landsat bucket doesn't have versioning",
+        changeDetectionPolicy.getSource() == Source.VersionId
+            && changeDetectionPolicy.isRequireVersion());
+
     rootPath = path("ITestS3SelectMRJob");
     Path workingDir = path("working");
     fs.setWorkingDirectory(workingDir);
@@ -199,7 +209,7 @@ public class ITestS3SelectMRJob extends AbstractS3SelectTest {
             IOUtils.readFully(in, buffer, 0, bytesLen);
             return new String(buffer);
           } catch (IOException ex) {
-            throw new WrappedIOException(ex);
+            throw new UncheckedIOException(ex);
           }
         }));
   }

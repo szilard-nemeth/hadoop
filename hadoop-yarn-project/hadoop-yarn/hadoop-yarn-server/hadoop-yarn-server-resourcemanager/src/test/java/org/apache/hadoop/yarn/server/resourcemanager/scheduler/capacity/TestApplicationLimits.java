@@ -17,6 +17,7 @@
  */
 package org.apache.hadoop.yarn.server.resourcemanager.scheduler.capacity;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
@@ -29,17 +30,14 @@ import static org.mockito.Mockito.when;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.security.UserGroupInformation;
+import org.apache.hadoop.util.Sets;
 import org.apache.hadoop.yarn.api.records.ApplicationAttemptId;
 import org.apache.hadoop.yarn.api.records.ApplicationId;
 import org.apache.hadoop.yarn.api.records.NodeId;
@@ -53,6 +51,8 @@ import org.apache.hadoop.yarn.factory.providers.RecordFactoryProvider;
 import org.apache.hadoop.yarn.nodelabels.CommonNodeLabelsManager;
 import org.apache.hadoop.yarn.server.resourcemanager.MockNM;
 import org.apache.hadoop.yarn.server.resourcemanager.MockRM;
+import org.apache.hadoop.yarn.server.resourcemanager.MockRMAppSubmissionData;
+import org.apache.hadoop.yarn.server.resourcemanager.MockRMAppSubmitter;
 import org.apache.hadoop.yarn.server.resourcemanager.RMContext;
 import org.apache.hadoop.yarn.server.resourcemanager.nodelabels.NullRMNodeLabelsManager;
 import org.apache.hadoop.yarn.server.resourcemanager.nodelabels.RMNodeLabelsManager;
@@ -77,13 +77,15 @@ import org.junit.Test;
 import org.mockito.ArgumentMatchers;
 import org.mockito.Mockito;
 
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Sets;
+import org.apache.hadoop.thirdparty.com.google.common.collect.ImmutableMap;
+import org.apache.hadoop.thirdparty.com.google.common.collect.ImmutableSet;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class TestApplicationLimits {
   
-  private static final Log LOG = LogFactory.getLog(TestApplicationLimits.class);
+  private static final Logger LOG =
+      LoggerFactory.getLogger(TestApplicationLimits.class);
   final static int GB = 1024;
 
   LeafQueue queue;
@@ -124,7 +126,7 @@ public class TestApplicationLimits {
     when(csContext.getContainerTokenSecretManager()).thenReturn(
         containerTokenSecretManager);
 
-    Map<String, CSQueue> queues = new HashMap<String, CSQueue>();
+    CSQueueStore queues = new CSQueueStore();
     root = CapacitySchedulerQueueManager
         .parseQueue(csContext, csConf, null, "root",
             queues, queues,
@@ -182,6 +184,7 @@ public class TestApplicationLimits {
     doReturn(amResource).when(application).getAMResource(
         CommonNodeLabelsManager.NO_LABEL);
     when(application.compareInputOrderTo(any(FiCaSchedulerApp.class))).thenCallRealMethod();
+    when(application.isRunnable()).thenReturn(true);
     return application;
   }
   
@@ -291,8 +294,8 @@ public class TestApplicationLimits {
     Resource clusterResource = 
       Resources.createResource(100 * 16 * GB, 100 * 16);
     when(csContext.getClusterResource()).thenReturn(clusterResource);
-    
-    Map<String, CSQueue> queues = new HashMap<String, CSQueue>();
+
+    CSQueueStore queues = new CSQueueStore();
     CSQueue root = 
         CapacitySchedulerQueueManager.parseQueue(csContext, csConf, null,
             "root", queues, queues, TestUtils.spyHook);
@@ -307,14 +310,15 @@ public class TestApplicationLimits {
     		queue.getUserAMResourceLimit());
     
     Resource amResourceLimit = Resource.newInstance(160 * GB, 1);
-    assertEquals(queue.calculateAndGetAMResourceLimit(), amResourceLimit);
-    assertEquals(queue.getUserAMResourceLimit(), 
+    assertThat(queue.calculateAndGetAMResourceLimit()).
+        isEqualTo(amResourceLimit);
+    assertThat(queue.getUserAMResourceLimit()).isEqualTo(
       Resource.newInstance(80*GB, 1));
     
     // Assert in metrics
-    assertEquals(queue.getMetrics().getAMResourceLimitMB(),
+    assertThat(queue.getMetrics().getAMResourceLimitMB()).isEqualTo(
         amResourceLimit.getMemorySize());
-    assertEquals(queue.getMetrics().getAMResourceLimitVCores(),
+    assertThat(queue.getMetrics().getAMResourceLimitVCores()).isEqualTo(
         amResourceLimit.getVirtualCores());
 
     assertEquals(
@@ -326,11 +330,11 @@ public class TestApplicationLimits {
     clusterResource = Resources.createResource(120 * 16 * GB);
     root.updateClusterResource(clusterResource, new ResourceLimits(
         clusterResource));
-    
-    assertEquals(queue.calculateAndGetAMResourceLimit(),
+
+    assertThat(queue.calculateAndGetAMResourceLimit()).isEqualTo(
         Resource.newInstance(192 * GB, 1));
-    assertEquals(queue.getUserAMResourceLimit(), 
-      Resource.newInstance(96*GB, 1));
+    assertThat(queue.getUserAMResourceLimit()).isEqualTo(
+        Resource.newInstance(96*GB, 1));
     
     assertEquals(
         (int)(clusterResource.getMemorySize() * queue.getAbsoluteCapacity()),
@@ -363,7 +367,7 @@ public class TestApplicationLimits {
     csConf.setFloat(PREFIX + queue.getQueuePath()
         + ".maximum-am-resource-percent", 0.5f);
     // Re-create queues to get new configs.
-    queues = new HashMap<String, CSQueue>();
+    queues = new CSQueueStore();
     root = CapacitySchedulerQueueManager.parseQueue(
         csContext, csConf, null, "root",
         queues, queues, TestUtils.spyHook);
@@ -377,17 +381,17 @@ public class TestApplicationLimits {
         (long) csConf.getMaximumApplicationMasterResourcePerQueuePercent(
           queue.getQueuePath())
         );
-    
-    assertEquals(queue.calculateAndGetAMResourceLimit(),
+
+    assertThat(queue.calculateAndGetAMResourceLimit()).isEqualTo(
         Resource.newInstance(800 * GB, 1));
-    assertEquals(queue.getUserAMResourceLimit(), 
-      Resource.newInstance(400*GB, 1));
+    assertThat(queue.getUserAMResourceLimit()).isEqualTo(
+        Resource.newInstance(400*GB, 1));
 
     // Change the per-queue max applications.
     csConf.setInt(PREFIX + queue.getQueuePath() + ".maximum-applications",
         9999);
     // Re-create queues to get new configs.
-    queues = new HashMap<String, CSQueue>();
+    queues = new CSQueueStore();
     root = CapacitySchedulerQueueManager.parseQueue(
         csContext, csConf, null, "root",
         queues, queues, TestUtils.spyHook);
@@ -598,8 +602,8 @@ public class TestApplicationLimits {
     // Say cluster has 100 nodes of 16G each
     Resource clusterResource = Resources.createResource(100 * 16 * GB);
     when(csContext.getClusterResource()).thenReturn(clusterResource);
-    
-    Map<String, CSQueue> queues = new HashMap<String, CSQueue>();
+
+    CSQueueStore queues = new CSQueueStore();
     CSQueue rootQueue = CapacitySchedulerQueueManager.parseQueue(csContext,
         csConf, null, "root", queues, queues, TestUtils.spyHook);
     rootQueue.updateClusterResource(clusterResource,
@@ -821,20 +825,41 @@ public class TestApplicationLimits {
 
     // Submit application to queue c where the default partition capacity is
     // zero
-    RMApp app1 = rm.submitApp(GB, "app", "user", null, "c", false);
+    RMApp app1 = MockRMAppSubmitter.submit(rm,
+        MockRMAppSubmissionData.Builder.createWithMemory(GB, rm)
+            .withAppName("app")
+            .withUser("user")
+            .withAcls(null)
+            .withQueue("c")
+            .withWaitForAppAcceptedState(false)
+            .build());
     rm.drainEvents();
     rm.waitForState(app1.getApplicationId(), RMAppState.ACCEPTED);
     assertEquals(RMAppState.ACCEPTED, app1.getState());
     rm.killApp(app1.getApplicationId());
 
-    RMApp app2 = rm.submitApp(GB, "app", "user", null, "a1", false);
+    RMApp app2 = MockRMAppSubmitter.submit(rm,
+        MockRMAppSubmissionData.Builder.createWithMemory(GB, rm)
+            .withAppName("app")
+            .withUser("user")
+            .withAcls(null)
+            .withQueue("a1")
+            .withWaitForAppAcceptedState(false)
+            .build());
     rm.drainEvents();
     rm.waitForState(app2.getApplicationId(), RMAppState.ACCEPTED);
     assertEquals(RMAppState.ACCEPTED, app2.getState());
 
     // Check second application is rejected and based on queue level max
     // application app is rejected
-    RMApp app3 = rm.submitApp(GB, "app", "user", null, "a1", false);
+    RMApp app3 = MockRMAppSubmitter.submit(rm,
+        MockRMAppSubmissionData.Builder.createWithMemory(GB, rm)
+            .withAppName("app")
+            .withUser("user")
+            .withAcls(null)
+            .withQueue("a1")
+            .withWaitForAppAcceptedState(false)
+            .build());
     rm.drainEvents();
     rm.waitForState(app3.getApplicationId(), RMAppState.FAILED);
     assertEquals(RMAppState.FAILED, app3.getState());
@@ -845,15 +870,36 @@ public class TestApplicationLimits {
         app3.getDiagnostics().toString());
 
     // based on Global limit of queue usert application is rejected
-    RMApp app11 = rm.submitApp(GB, "app", "user", null, "d", false);
+    RMApp app11 = MockRMAppSubmitter.submit(rm,
+        MockRMAppSubmissionData.Builder.createWithMemory(GB, rm)
+            .withAppName("app")
+            .withUser("user")
+            .withAcls(null)
+            .withQueue("d")
+            .withWaitForAppAcceptedState(false)
+            .build());
     rm.drainEvents();
     rm.waitForState(app11.getApplicationId(), RMAppState.ACCEPTED);
     assertEquals(RMAppState.ACCEPTED, app11.getState());
-    RMApp app12 = rm.submitApp(GB, "app", "user", null, "d", false);
+    RMApp app12 = MockRMAppSubmitter.submit(rm,
+        MockRMAppSubmissionData.Builder.createWithMemory(GB, rm)
+            .withAppName("app")
+            .withUser("user")
+            .withAcls(null)
+            .withQueue("d")
+            .withWaitForAppAcceptedState(false)
+            .build());
     rm.drainEvents();
     rm.waitForState(app12.getApplicationId(), RMAppState.ACCEPTED);
     assertEquals(RMAppState.ACCEPTED, app12.getState());
-    RMApp app13 = rm.submitApp(GB, "app", "user", null, "d", false);
+    RMApp app13 = MockRMAppSubmitter.submit(rm,
+        MockRMAppSubmissionData.Builder.createWithMemory(GB, rm)
+            .withAppName("app")
+            .withUser("user")
+            .withAcls(null)
+            .withQueue("d")
+            .withWaitForAppAcceptedState(false)
+            .build());
     rm.drainEvents();
     rm.waitForState(app13.getApplicationId(), RMAppState.FAILED);
     assertEquals(RMAppState.FAILED, app13.getState());
@@ -864,10 +910,24 @@ public class TestApplicationLimits {
         app13.getDiagnostics().toString());
 
     // based on system max limit application is rejected
-    RMApp app14 = rm.submitApp(GB, "app", "user2", null, "a2", false);
+    RMApp app14 = MockRMAppSubmitter.submit(rm,
+        MockRMAppSubmissionData.Builder.createWithMemory(GB, rm)
+            .withAppName("app")
+            .withUser("user2")
+            .withAcls(null)
+            .withQueue("a2")
+            .withWaitForAppAcceptedState(false)
+            .build());
     rm.drainEvents();
     rm.waitForState(app14.getApplicationId(), RMAppState.ACCEPTED);
-    RMApp app15 = rm.submitApp(GB, "app", "user2", null, "a2", false);
+    RMApp app15 = MockRMAppSubmitter.submit(rm,
+        MockRMAppSubmissionData.Builder.createWithMemory(GB, rm)
+            .withAppName("app")
+            .withUser("user2")
+            .withAcls(null)
+            .withQueue("a2")
+            .withWaitForAppAcceptedState(false)
+            .build());
     rm.drainEvents();
     rm.waitForState(app15.getApplicationId(), RMAppState.FAILED);
     assertEquals(RMAppState.FAILED, app15.getState());

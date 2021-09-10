@@ -18,8 +18,6 @@
 
 package org.apache.hadoop.hdfs.server.datanode;
 
-import com.google.common.base.Joiner;
-import com.google.common.collect.Lists;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.conf.ReconfigurationException;
 import org.apache.hadoop.fs.BlockLocation;
@@ -51,10 +49,13 @@ import org.apache.hadoop.hdfs.server.protocol.DatanodeStorage;
 import org.apache.hadoop.hdfs.server.protocol.StorageBlockReport;
 import org.apache.hadoop.io.MultipleIOException;
 import org.apache.hadoop.test.GenericTestUtils;
+import org.apache.hadoop.util.Lists;
 import org.apache.hadoop.util.Time;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Test;
+
+import org.apache.hadoop.thirdparty.com.google.common.base.Joiner;
 
 import java.io.File;
 import java.io.IOException;
@@ -118,21 +119,7 @@ public class TestDataNodeHotSwapVolumes {
   private void startDFSCluster(int numNameNodes, int numDataNodes,
       int storagePerDataNode) throws IOException {
     shutdown();
-    conf = new Configuration();
-    conf.setLong(DFSConfigKeys.DFS_BLOCK_SIZE_KEY, BLOCK_SIZE);
-
-    /*
-     * Lower the DN heartbeat, DF rate, and recheck interval to one second
-     * so state about failures and datanode death propagates faster.
-     */
-    conf.setInt(DFSConfigKeys.DFS_HEARTBEAT_INTERVAL_KEY, 1);
-    conf.setInt(DFSConfigKeys.DFS_DF_INTERVAL_KEY, 1000);
-    conf.setInt(DFSConfigKeys.DFS_NAMENODE_HEARTBEAT_RECHECK_INTERVAL_KEY,
-        1000);
-    /* Allow 1 volume failure */
-    conf.setInt(DFSConfigKeys.DFS_DATANODE_FAILED_VOLUMES_TOLERATED_KEY, 1);
-    conf.setTimeDuration(DFSConfigKeys.DFS_DATANODE_DISK_CHECK_MIN_GAP_KEY,
-        0, TimeUnit.MILLISECONDS);
+    conf = setConfiguration(new Configuration());
 
     MiniDFSNNTopology nnTopology =
         MiniDFSNNTopology.simpleFederatedTopology(numNameNodes);
@@ -143,6 +130,28 @@ public class TestDataNodeHotSwapVolumes {
         .storagesPerDatanode(storagePerDataNode)
         .build();
     cluster.waitActive();
+  }
+
+  private Configuration setConfiguration(Configuration config) {
+    config.setLong(DFSConfigKeys.DFS_BLOCK_SIZE_KEY, BLOCK_SIZE);
+
+    config.setLong(DFSConfigKeys.DFS_BLOCK_SIZE_KEY, BLOCK_SIZE);
+    config.setLong(DFSConfigKeys.DFS_NAMENODE_MIN_BLOCK_SIZE_KEY, 1);
+
+    /*
+     * Lower the DN heartbeat, DF rate, and recheck interval to one second
+     * so state about failures and datanode death propagates faster.
+     */
+    config.setInt(DFSConfigKeys.DFS_HEARTBEAT_INTERVAL_KEY, 1);
+    config.setInt(DFSConfigKeys.DFS_DF_INTERVAL_KEY, 1000);
+    config.setInt(DFSConfigKeys.DFS_NAMENODE_HEARTBEAT_RECHECK_INTERVAL_KEY,
+        1000);
+    /* Allow 1 volume failure */
+    config.setInt(DFSConfigKeys.DFS_DATANODE_FAILED_VOLUMES_TOLERATED_KEY, 1);
+    config.setTimeDuration(DFSConfigKeys.DFS_DATANODE_DISK_CHECK_MIN_GAP_KEY,
+        0, TimeUnit.MILLISECONDS);
+
+    return config;
   }
 
   private void shutdown() {
@@ -416,8 +425,76 @@ public class TestDataNodeHotSwapVolumes {
       minNumBlocks = Math.min(minNumBlocks, blockList.getNumberOfBlocks());
       maxNumBlocks = Math.max(maxNumBlocks, blockList.getNumberOfBlocks());
     }
-    assertTrue(Math.abs(maxNumBlocks - maxNumBlocks) <= 1);
+    assertTrue(Math.abs(maxNumBlocks - minNumBlocks) <= 1);
     verifyFileLength(cluster.getFileSystem(), testFile, numBlocks);
+  }
+
+  /**
+   * Test re-adding one volume with some blocks on a running MiniDFSCluster
+   * with only one NameNode to reproduce HDFS-13677.
+   */
+  @Test(timeout=60000)
+  public void testReAddVolumeWithBlocks()
+      throws IOException, ReconfigurationException,
+      InterruptedException, TimeoutException {
+    startDFSCluster(1, 1);
+    String bpid = cluster.getNamesystem().getBlockPoolId();
+    final int numBlocks = 10;
+
+    Path testFile = new Path("/test");
+    createFile(testFile, numBlocks);
+
+    List<Map<DatanodeStorage, BlockListAsLongs>> blockReports =
+        cluster.getAllBlockReports(bpid);
+    assertEquals(1, blockReports.size());  // 1 DataNode
+    assertEquals(2, blockReports.get(0).size());  // 2 volumes
+
+    // Now remove the second volume
+    DataNode dn = cluster.getDataNodes().get(0);
+    Collection<String> oldDirs = getDataDirs(dn);
+    String newDirs = oldDirs.iterator().next();  // Keep the first volume.
+    assertThat(
+        "DN did not update its own config",
+        dn.reconfigurePropertyImpl(
+            DFSConfigKeys.DFS_DATANODE_DATA_DIR_KEY, newDirs),
+        is(dn.getConf().get(DFS_DATANODE_DATA_DIR_KEY)));
+    assertFileLocksReleased(
+        new ArrayList<String>(oldDirs).subList(1, oldDirs.size()));
+
+    // Now create another file - the first volume should have 15 blocks
+    // and 5 blocks on the previously removed volume
+    createFile(new Path("/test2"), numBlocks);
+    dn.scheduleAllBlockReport(0);
+    blockReports = cluster.getAllBlockReports(bpid);
+
+    assertEquals(1, blockReports.size());  // 1 DataNode
+    assertEquals(1, blockReports.get(0).size());  // 1 volume
+    for (BlockListAsLongs blockList : blockReports.get(0).values()) {
+      assertEquals(15, blockList.getNumberOfBlocks());
+    }
+
+    // Now add the original volume back again and ensure 15 blocks are reported
+    assertThat(
+        "DN did not update its own config",
+        dn.reconfigurePropertyImpl(
+            DFSConfigKeys.DFS_DATANODE_DATA_DIR_KEY, String.join(",", oldDirs)),
+        is(dn.getConf().get(DFS_DATANODE_DATA_DIR_KEY)));
+    dn.scheduleAllBlockReport(0);
+    blockReports = cluster.getAllBlockReports(bpid);
+
+    assertEquals(1, blockReports.size());  // 1 DataNode
+    assertEquals(2, blockReports.get(0).size());  // 2 volumes
+
+    // The order of the block reports is not guaranteed. As we expect 2, get the
+    // max block count and the min block count and then assert on that.
+    int minNumBlocks = Integer.MAX_VALUE;
+    int maxNumBlocks = Integer.MIN_VALUE;
+    for (BlockListAsLongs blockList : blockReports.get(0).values()) {
+      minNumBlocks = Math.min(minNumBlocks, blockList.getNumberOfBlocks());
+      maxNumBlocks = Math.max(maxNumBlocks, blockList.getNumberOfBlocks());
+    }
+    assertEquals(5, minNumBlocks);
+    assertEquals(15, maxNumBlocks);
   }
 
   @Test(timeout=60000)
@@ -481,7 +558,8 @@ public class TestDataNodeHotSwapVolumes {
     dn.data = Mockito.spy(data);
 
     final int newVolumeCount = 40;
-    List<Thread> addVolumeDelayedThreads = new ArrayList<>();
+    List<Thread> addVolumeDelayedThreads =
+        Collections.synchronizedList(new ArrayList<>());
     AtomicBoolean addVolumeError = new AtomicBoolean(false);
     AtomicBoolean listStorageError = new AtomicBoolean(false);
     CountDownLatch addVolumeCompletionLatch =
@@ -1049,5 +1127,35 @@ public class TestDataNodeHotSwapVolumes {
         anyString(),
         any(StorageBlockReport[].class),
         any(BlockReportContext.class));
+  }
+
+  @Test(timeout=60000)
+  public void testAddVolumeWithVolumeOnSameMount()
+      throws IOException {
+    shutdown();
+    conf = setConfiguration(new Configuration());
+    conf.setBoolean(DFSConfigKeys.DFS_DATANODE_ALLOW_SAME_DISK_TIERING, true);
+    conf.setDouble(DFSConfigKeys
+        .DFS_DATANODE_RESERVE_FOR_ARCHIVE_DEFAULT_PERCENTAGE, 0.4);
+    cluster = new MiniDFSCluster.Builder(conf)
+        .numDataNodes(1)
+        .storagesPerDatanode(2)
+        .storageTypes(new StorageType[]{StorageType.DISK, StorageType.ARCHIVE})
+        .build();
+
+    DataNode dn = cluster.getDataNodes().get(0);
+    List<String> dirs = getDataDirs(dn);
+    dirs.add(dirs.get(1) + "_2");
+
+    // Replace should be successful.
+    try {
+      String[] newVal = dn.reconfigurePropertyImpl(DFS_DATANODE_DATA_DIR_KEY,
+          String.join(",", dirs)).split(",");
+      fail("Adding mount should fail.");
+    } catch (Exception e) {
+      assertTrue(e.getCause()
+          .getLocalizedMessage().contains("already has volume"));
+    }
+
   }
 }

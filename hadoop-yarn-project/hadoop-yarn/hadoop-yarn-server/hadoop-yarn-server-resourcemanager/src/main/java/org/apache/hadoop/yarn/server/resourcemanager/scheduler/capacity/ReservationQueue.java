@@ -22,8 +22,6 @@ import java.io.IOException;
 
 import org.apache.hadoop.yarn.api.records.Resource;
 import org.apache.hadoop.yarn.server.resourcemanager.reservation.ReservationSystem;
-import org.apache.hadoop.yarn.server.resourcemanager.scheduler.SchedulerDynamicEditException;
-import org.apache.hadoop.yarn.server.resourcemanager.scheduler.common.QueueEntitlement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -53,8 +51,8 @@ public class ReservationQueue extends AbstractAutoCreatedLeafQueue {
   @Override
   public void reinitialize(CSQueue newlyParsedQueue,
       Resource clusterResource) throws IOException {
+    writeLock.lock();
     try {
-      writeLock.lock();
       // Sanity check
       if (!(newlyParsedQueue instanceof ReservationQueue) || !newlyParsedQueue
           .getQueuePath().equals(getQueuePath())) {
@@ -75,7 +73,7 @@ public class ReservationQueue extends AbstractAutoCreatedLeafQueue {
     }
   }
 
-  private void updateQuotas(int userLimit, float userLimitFactor,
+  private void updateQuotas(float userLimit, float userLimitFactor,
       int maxAppsForReservation, int maxAppsPerUserForReservation) {
     setUserLimit(userLimit);
     setUserLimitFactor(userLimitFactor);
@@ -86,6 +84,6 @@ public class ReservationQueue extends AbstractAutoCreatedLeafQueue {
   @Override
   protected void setupConfigurableCapacities(CapacitySchedulerConfiguration
       configuration) {
-    super.setupConfigurableCapacities(queueCapacities);
+    super.updateAbsoluteCapacities();
   }
 }

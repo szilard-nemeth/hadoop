@@ -24,6 +24,7 @@ import java.io.ObjectInputValidation;
 import java.io.Serializable;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.Optional;
 import java.util.regex.Pattern;
 
 import org.apache.avro.reflect.Stringable;
@@ -40,7 +41,8 @@ import org.apache.hadoop.conf.Configuration;
 @Stringable
 @InterfaceAudience.Public
 @InterfaceStability.Stable
-public class Path implements Comparable, Serializable, ObjectInputValidation {
+public class Path
+    implements Comparable<Path>, Serializable, ObjectInputValidation {
 
   /**
    * The directory separator, a slash.
@@ -68,6 +70,9 @@ public class Path implements Comparable, Serializable, ObjectInputValidation {
    */
   private static final Pattern HAS_DRIVE_LETTER_SPECIFIER =
       Pattern.compile("^/?[a-zA-Z]:");
+
+  /** Pre-compiled regular expressions to detect duplicated slashes. */
+  private static final Pattern SLASHES = Pattern.compile("/+");
 
   private static final long serialVersionUID = 0xad00f;
 
@@ -290,8 +295,8 @@ public class Path implements Comparable, Serializable, ObjectInputValidation {
    * @return the normalized path string
    */
   private static String normalizePath(String scheme, String path) {
-    // Remove double forward slashes.
-    path = StringUtils.replace(path, "//", "/");
+    // Remove duplicated slashes.
+    path = SLASHES.matcher(path).replaceAll("/");
 
     // Remove backslashes if this looks like a Windows path. Avoid
     // the substitution if it looks like a non-local URI.
@@ -416,22 +421,39 @@ public class Path implements Comparable, Serializable, ObjectInputValidation {
   }
 
   /**
-   * Returns the parent of a path or null if at root.
+   * Returns the parent of a path or null if at root. Better alternative is
+   * {@link #getOptionalParentPath()} to handle nullable value for root path.
+   *
    * @return the parent of a path or null if at root
    */
   public Path getParent() {
+    return getParentUtil();
+  }
+
+  /**
+   * Returns the parent of a path as {@link Optional} or
+   * {@link Optional#empty()} i.e an empty Optional if at root.
+   *
+   * @return Parent of path wrappen in {@link Optional}.
+   * {@link Optional#empty()} i.e an empty Optional if at root.
+   */
+  public Optional<Path> getOptionalParentPath() {
+    return Optional.ofNullable(getParentUtil());
+  }
+
+  private Path getParentUtil() {
     String path = uri.getPath();
     int lastSlash = path.lastIndexOf('/');
     int start = startPositionWithoutWindowsDrive(path);
     if ((path.length() == start) ||               // empty path
-        (lastSlash == start && path.length() == start+1)) { // at root
+        (lastSlash == start && path.length() == start + 1)) { // at root
       return null;
     }
     String parent;
-    if (lastSlash==-1) {
+    if (lastSlash == -1) {
       parent = CUR_DIR;
     } else {
-      parent = path.substring(0, lastSlash==start?start+1:lastSlash);
+      parent = path.substring(0, lastSlash == start ? start + 1 : lastSlash);
     }
     return new Path(uri.getScheme(), uri.getAuthority(), parent);
   }
@@ -490,11 +512,10 @@ public class Path implements Comparable, Serializable, ObjectInputValidation {
   }
 
   @Override
-  public int compareTo(Object o) {
-    Path that = (Path)o;
-    return this.uri.compareTo(that.uri);
+  public int compareTo(Path o) {
+    return this.uri.compareTo(o.uri);
   }
-  
+
   /**
    * Returns the number of elements in this path.
    * @return the number of elements in this path

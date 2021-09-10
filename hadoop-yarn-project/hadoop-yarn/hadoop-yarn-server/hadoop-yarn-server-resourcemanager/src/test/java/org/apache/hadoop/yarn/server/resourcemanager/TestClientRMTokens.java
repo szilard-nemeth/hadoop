@@ -36,7 +36,7 @@ import java.net.InetSocketAddress;
 import java.security.PrivilegedAction;
 import java.security.PrivilegedExceptionAction;
 
-import com.google.protobuf.InvalidProtocolBufferException;
+import org.apache.hadoop.thirdparty.protobuf.InvalidProtocolBufferException;
 import org.apache.hadoop.io.DataOutputBuffer;
 import org.apache.hadoop.net.NetUtils;
 import org.apache.hadoop.security.token.delegation.TestDelegationToken;
@@ -44,8 +44,8 @@ import org.apache.hadoop.yarn.server.resourcemanager.recovery.records.RMDelegati
 import org.junit.AfterClass;
 import org.junit.Assert;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.CommonConfigurationKeys;
 import org.apache.hadoop.fs.CommonConfigurationKeysPublic;
@@ -84,7 +84,8 @@ import org.junit.Test;
 
 public class TestClientRMTokens {
 
-  private static final Log LOG = LogFactory.getLog(TestClientRMTokens.class);
+  private static final Logger LOG =
+      LoggerFactory.getLogger(TestClientRMTokens.class);
   
   // Note : Any test case in ResourceManager package that creates a proxy has
   // to be run with enabling hadoop.security.token.service.use_ip. And reset
@@ -543,8 +544,9 @@ public class TestClientRMTokens {
         ResourceScheduler scheduler,
         RMDelegationTokenSecretManager rmDTSecretManager) {
       super(mock(RMContext.class), scheduler, mock(RMAppManager.class),
-          new ApplicationACLsManager(conf), new QueueACLsManager(scheduler,
-              conf), rmDTSecretManager);
+          new ApplicationACLsManager(conf),
+          QueueACLsManager.getQueueACLsManager(scheduler, conf),
+          rmDTSecretManager);
     }
 
     // Use a random port unless explicitly specified.

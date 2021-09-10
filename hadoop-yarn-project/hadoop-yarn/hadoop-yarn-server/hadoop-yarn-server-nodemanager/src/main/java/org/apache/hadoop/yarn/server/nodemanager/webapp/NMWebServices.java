@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Map.Entry;
 import java.util.Set;
 
+import org.apache.hadoop.io.IOUtils;
 import org.apache.hadoop.yarn.server.nodemanager.containermanager.records.AuxServiceRecord;
 import org.apache.hadoop.yarn.server.nodemanager.containermanager.records.AuxServiceRecords;
 import org.apache.hadoop.yarn.server.nodemanager.containermanager.resourceplugin.ResourcePlugin;
@@ -55,7 +56,6 @@ import javax.ws.rs.core.Response.ResponseBuilder;
 import javax.ws.rs.core.Response.Status;
 import javax.ws.rs.core.StreamingOutput;
 import javax.ws.rs.core.UriInfo;
-import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.classification.InterfaceAudience.Public;
 import org.apache.hadoop.classification.InterfaceStability.Unstable;
@@ -328,9 +328,7 @@ public class NMWebServices {
       } catch (IOException ex) {
         // Something wrong with we tries to access the remote fs for the logs.
         // Skip it and do nothing
-        if (LOG.isDebugEnabled()) {
-          LOG.debug(ex.getMessage());
-        }
+        LOG.debug("{}", ex);
       }
       GenericEntity<List<ContainerLogsInfo>> meta = new GenericEntity<List<
           ContainerLogsInfo>>(containersLogsInfo){};
@@ -433,10 +431,8 @@ public class NMWebServices {
     } catch (Exception ex) {
       // This NM does not have this container any more. We
       // assume the container has already finished.
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("Can not find the container:" + containerId
-            + " in this node.");
-      }
+      LOG.debug("Can not find the container:{} in this node.",
+          containerId);
     }
     final boolean isRunning = tempIsRunning;
     File logFile = null;
@@ -522,7 +518,7 @@ public class NMWebServices {
               }
             }
           } finally {
-            IOUtils.closeQuietly(fis);
+            IOUtils.closeStream(fis);
           }
         }
       };

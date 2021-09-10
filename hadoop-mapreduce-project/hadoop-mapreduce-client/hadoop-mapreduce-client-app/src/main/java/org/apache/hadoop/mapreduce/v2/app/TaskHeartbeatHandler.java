@@ -24,7 +24,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.mapreduce.MRJobConfig;
 import org.apache.hadoop.mapreduce.util.MRJobConfUtil;
@@ -192,7 +192,8 @@ public class TaskHeartbeatHandler extends AbstractService {
             (currentTime > (entry.getValue().getLastProgress() + taskTimeOut));
         // when container in NM not started in a long time,
         // we think the taskAttempt is stuck
-        boolean taskStuck = (!entry.getValue().isReported()) &&
+        boolean taskStuck = (taskStuckTimeOut > 0) &&
+            (!entry.getValue().isReported()) &&
             (currentTime >
                 (entry.getValue().getLastProgress() + taskStuckTimeOut));
 
@@ -225,7 +226,7 @@ public class TaskHeartbeatHandler extends AbstractService {
   }
 
   @VisibleForTesting
-  ConcurrentMap getRunningAttempts(){
+  ConcurrentMap<TaskAttemptId, ReportTime> getRunningAttempts(){
     return runningAttempts;
   }
 

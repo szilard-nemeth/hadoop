@@ -194,6 +194,15 @@ The order in which you set these configurations is unimportant, but the values y
           <value>qjournal://node1.example.com:8485;node2.example.com:8485;node3.example.com:8485/mycluster</value>
         </property>
 
+    You can also configure journal nodes by setting up dns round-robin record to avoid hardcoded names:
+
+        <property>
+          <name>dfs.namenode.edits.qjournals.resolution-enabled</name>
+          <value>true</value>
+        </property>
+
+    This will require you to configure multiple IPs behind one dns record on the host level, for example round robin DNS.
+
 *   **dfs.client.failover.proxy.provider.[nameservice ID]** - the Java class that HDFS clients use to contact the Active NameNode
 
     Configure the name of the Java class which will be used by the DFS Client to
@@ -345,6 +354,18 @@ The order in which you set these configurations is unimportant, but the values y
         <property>
           <name>dfs.journalnode.edits.dir</name>
           <value>/path/to/journal/node/local/data</value>
+        </property>
+
+*   **dfs.ha.nn.not-become-active-in-safemode** - if prevent safe mode namenodes to become active
+
+    Whether allow namenode to become active when it is in safemode, when it is
+    set to true, namenode in safemode will report SERVICE_UNHEALTHY to ZKFC if
+    auto failover is on, or will throw exception to fail the transition to
+    active if auto failover is off. For example:
+
+        <property>
+          <name>dfs.ha.nn.not-become-active-in-safemode</name>
+          <value>true</value>
         </property>
 
 ### Deployment details

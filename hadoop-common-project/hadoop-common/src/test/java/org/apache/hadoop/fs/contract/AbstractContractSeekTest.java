@@ -272,7 +272,7 @@ public abstract class AbstractContractSeekTest extends AbstractFSContractTestBas
     describe("Seek round a large file and verify the bytes are what is expected");
     Path testSeekFile = path("bigseekfile.txt");
     byte[] block = dataset(100 * 1024, 0, 255);
-    createFile(getFileSystem(), testSeekFile, false, block);
+    createFile(getFileSystem(), testSeekFile, true, block);
     instream = getFileSystem().open(testSeekFile);
     assertEquals(0, instream.getPos());
     //expect that seek to 0 works
@@ -309,7 +309,7 @@ public abstract class AbstractContractSeekTest extends AbstractFSContractTestBas
     assumeSupportsPositionedReadable();
     Path testSeekFile = path("bigseekfile.txt");
     byte[] block = dataset(65536, 0, 255);
-    createFile(getFileSystem(), testSeekFile, false, block);
+    createFile(getFileSystem(), testSeekFile, true, block);
     instream = getFileSystem().open(testSeekFile);
     instream.seek(39999);
     assertTrue(-1 != instream.read());
@@ -317,7 +317,7 @@ public abstract class AbstractContractSeekTest extends AbstractFSContractTestBas
 
     int v = 256;
     byte[] readBuffer = new byte[v];
-    assertEquals(v, instream.read(128, readBuffer, 0, v));
+    instream.readFully(128, readBuffer, 0, v);
     //have gone back
     assertEquals(40000, instream.getPos());
     //content is the same too
@@ -572,8 +572,7 @@ public abstract class AbstractContractSeekTest extends AbstractFSContractTestBas
 
     // now read the entire file in one go
     byte[] fullFile = new byte[TEST_FILE_LEN];
-    assertEquals(TEST_FILE_LEN,
-        instream.read(0, fullFile, 0, fullFile.length));
+    instream.readFully(0, fullFile, 0, fullFile.length);
     assertEquals(0, instream.getPos());
 
     // now read past the end of the file

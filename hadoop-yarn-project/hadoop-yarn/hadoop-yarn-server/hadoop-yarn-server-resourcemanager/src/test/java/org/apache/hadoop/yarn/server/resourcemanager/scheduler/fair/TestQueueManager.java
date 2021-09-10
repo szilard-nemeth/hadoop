@@ -23,9 +23,11 @@ import static org.mockito.Mockito.*;
 import java.util.Collections;
 import java.util.Set;
 
+import org.apache.hadoop.util.Sets;
 import org.apache.hadoop.yarn.api.records.ApplicationAttemptId;
 import org.apache.hadoop.yarn.api.records.ApplicationId;
 import org.apache.hadoop.yarn.server.resourcemanager.RMContext;
+import org.apache.hadoop.yarn.server.resourcemanager.placement.PlacementManager;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.ActiveUsersManager;
 import org.apache.hadoop.yarn.util.SystemClock;
 import org.apache.hadoop.yarn.util.resource.DefaultResourceCalculator;
@@ -34,38 +36,45 @@ import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mockito;
 
-import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Sets;
+import org.apache.hadoop.thirdparty.com.google.common.collect.ImmutableSet;
 
+/**
+ * Test the {@link FairScheduler} queue manager correct queue hierarchies
+ * management (create, delete and type changes).
+ */
 public class TestQueueManager {
-  private FairSchedulerConfiguration conf;
   private QueueManager queueManager;
   private FairScheduler scheduler;
-  
-  @Before
-  public void setUp() throws Exception {
-    conf = new FairSchedulerConfiguration();
-    scheduler = mock(FairScheduler.class);
 
-    AllocationConfiguration allocConf = new AllocationConfiguration(conf);
+  @Before
+  public void setUp() {
+    PlacementManager placementManager = new PlacementManager();
+    FairSchedulerConfiguration conf = new FairSchedulerConfiguration();
+    RMContext rmContext = mock(RMContext.class);
+    when(rmContext.getQueuePlacementManager()).thenReturn(placementManager);
+    SystemClock clock = SystemClock.getInstance();
+
+    scheduler = mock(FairScheduler.class);
+    when(scheduler.getConf()).thenReturn(conf);
+    when(scheduler.getConfig()).thenReturn(conf);
+    when(scheduler.getRMContext()).thenReturn(rmContext);
+    when(scheduler.getResourceCalculator()).thenReturn(
+        new DefaultResourceCalculator());
+    when(scheduler.getClock()).thenReturn(clock);
+
+    AllocationConfiguration allocConf =
+        new AllocationConfiguration(scheduler);
+    when(scheduler.getAllocationConfiguration()).thenReturn(allocConf);
 
     // Set up some queues to test default child max resource inheritance
     allocConf.configuredQueues.get(FSQueueType.PARENT).add("root.test");
     allocConf.configuredQueues.get(FSQueueType.LEAF).add("root.test.childA");
     allocConf.configuredQueues.get(FSQueueType.PARENT).add("root.test.childB");
 
-    when(scheduler.getAllocationConfiguration()).thenReturn(allocConf);
-    when(scheduler.getConf()).thenReturn(conf);
-    when(scheduler.getResourceCalculator()).thenReturn(
-        new DefaultResourceCalculator());
-
-    SystemClock clock = SystemClock.getInstance();
-
-    when(scheduler.getClock()).thenReturn(clock);
     queueManager = new QueueManager(scheduler);
 
     FSQueueMetrics.forQueue("root", null, true, conf);
-    queueManager.initialize(conf);
+    queueManager.initialize();
     queueManager.updateAllocationConfiguration(allocConf);
   }
 
@@ -107,10 +116,11 @@ public class TestQueueManager {
     assertNotNull(queueManager.getLeafQueue("queue1.queue2", false));
     assertNull(queueManager.getLeafQueue("queue1", false));
     
-    // Should never to be able to create a queue under the default queue
+    // Since YARN-7769 FS doesn't create the default queue during init, so
+    // it should be possible to create a queue under the root.default queue
     updateConfiguredLeafQueues(queueManager, "default.queue3");
-    assertNull(queueManager.getLeafQueue("default.queue3", false));
-    assertNotNull(queueManager.getLeafQueue("default", false));
+    assertNotNull(queueManager.getLeafQueue("default.queue3", false));
+    assertNull(queueManager.getLeafQueue("default", false));
   }
 
   /**
@@ -118,7 +128,8 @@ public class TestQueueManager {
    */
   @Test
   public void testReloadTurnsLeafToParentWithNoLeaf() {
-    AllocationConfiguration allocConf = new AllocationConfiguration(conf);
+    AllocationConfiguration allocConf =
+        new AllocationConfiguration(scheduler);
     // Create a leaf queue1
     allocConf.configuredQueues.get(FSQueueType.LEAF).add("root.queue1");
     queueManager.updateAllocationConfiguration(allocConf);
@@ -130,7 +141,7 @@ public class TestQueueManager {
     FSLeafQueue q1 = queueManager.getLeafQueue("queue1", false);
     ApplicationId appId = ApplicationId.newInstance(0, 0);
     q1.addAssignedApp(appId);
-    allocConf = new AllocationConfiguration(conf);
+    allocConf = new AllocationConfiguration(scheduler);
     allocConf.configuredQueues.get(FSQueueType.PARENT)
         .add("root.queue1");
 
@@ -169,7 +180,8 @@ public class TestQueueManager {
 
   private void updateConfiguredLeafQueues(QueueManager queueMgr,
                                           String... confLeafQueues) {
-    AllocationConfiguration allocConf = new AllocationConfiguration(conf);
+    AllocationConfiguration allocConf =
+        new AllocationConfiguration(scheduler);
     allocConf.configuredQueues.get(FSQueueType.LEAF)
         .addAll(Sets.newHashSet(confLeafQueues));
     queueMgr.updateAllocationConfiguration(allocConf);
@@ -560,6 +572,7 @@ public class TestQueueManager {
     ActiveUsersManager activeUsersManager =
         Mockito.mock(ActiveUsersManager.class);
     RMContext rmContext = Mockito.mock(RMContext.class);
+    doReturn(scheduler.getConfig()).when(rmContext).getYarnConfiguration();
 
     // the appAttempt is created
     // removeEmptyDynamicQueues() should not remove the queue

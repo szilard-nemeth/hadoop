@@ -20,8 +20,8 @@
 
 package org.apache.hadoop.yarn.server.nodemanager.containermanager.linux.resources;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Joiner;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.base.Joiner;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.hadoop.classification.InterfaceAudience;
@@ -66,8 +66,7 @@ class CGroupsHandlerImpl implements CGroupsHandler {
 
   private final String mtabFile;
   private final String cGroupPrefix;
-  private final boolean enableCGroupMount;
-  private final String cGroupMountPath;
+  private final CGroupsMountConfig cGroupsMountConfig;
   private final long deleteCGroupTimeout;
   private final long deleteCGroupDelay;
   private Map<CGroupController, String> controllerPaths;
@@ -91,10 +90,7 @@ class CGroupsHandlerImpl implements CGroupsHandler {
     this.cGroupPrefix = conf.get(YarnConfiguration.
         NM_LINUX_CONTAINER_CGROUPS_HIERARCHY, "/hadoop-yarn")
         .replaceAll("^/+", "").replaceAll("/+$", "");
-    this.enableCGroupMount = conf.getBoolean(YarnConfiguration.
-        NM_LINUX_CONTAINER_CGROUPS_MOUNT, false);
-    this.cGroupMountPath = conf.get(YarnConfiguration.
-        NM_LINUX_CONTAINER_CGROUPS_MOUNT_PATH, null);
+    this.cGroupsMountConfig = new CGroupsMountConfig(conf);
     this.deleteCGroupTimeout = conf.getLong(
         YarnConfiguration.NM_LINUX_CONTAINER_CGROUPS_DELETE_TIMEOUT,
         YarnConfiguration.DEFAULT_NM_LINUX_CONTAINER_CGROUPS_DELETE_TIMEOUT) +
@@ -130,8 +126,8 @@ class CGroupsHandlerImpl implements CGroupsHandler {
 
   @Override
   public String getControllerPath(CGroupController controller) {
+    rwLock.readLock().lock();
     try {
-      rwLock.readLock().lock();
       return controllerPaths.get(controller);
     } finally {
       rwLock.readLock().unlock();
@@ -150,9 +146,9 @@ class CGroupsHandlerImpl implements CGroupsHandler {
     Map<String, Set<String>> newMtab = null;
     Map<CGroupController, String> cPaths;
     try {
-      if (this.cGroupMountPath != null && !this.enableCGroupMount) {
+      if (this.cGroupsMountConfig.mountDisabledButMountPathDefined()) {
         newMtab = ResourceHandlerModule.
-            parseConfiguredCGroupPath(this.cGroupMountPath);
+            parseConfiguredCGroupPath(this.cGroupsMountConfig.getMountPath());
       }
 
       if (newMtab == null) {
@@ -169,8 +165,8 @@ class CGroupsHandlerImpl implements CGroupsHandler {
     }
 
     // we want to do a bulk update without the paths changing concurrently
+    rwLock.writeLock().lock();
     try {
-      rwLock.writeLock().lock();
       controllerPaths = cPaths;
       parsedMtab = newMtab;
     } finally {
@@ -282,21 +278,16 @@ class CGroupsHandlerImpl implements CGroupsHandler {
 
   private void mountCGroupController(CGroupController controller)
       throws ResourceHandlerException {
-    if (cGroupMountPath == null) {
-      throw new ResourceHandlerException(
-          String.format("Cgroups mount path not specified in %s.",
-              YarnConfiguration.NM_LINUX_CONTAINER_CGROUPS_MOUNT_PATH));
-    }
     String existingMountPath = getControllerPath(controller);
     String requestedMountPath =
-        new File(cGroupMountPath, controller.getName()).getAbsolutePath();
+        new File(cGroupsMountConfig.getMountPath(),
+            controller.getName()).getAbsolutePath();
 
     if (existingMountPath == null ||
         !requestedMountPath.equals(existingMountPath)) {
+      //lock out other readers/writers till we are done
+      rwLock.writeLock().lock();
       try {
-        //lock out other readers/writers till we are done
-        rwLock.writeLock().lock();
-
         // If the controller was already mounted we have to mount it
         // with the same options to clone the mount point otherwise
         // the operation will fail
@@ -368,7 +359,8 @@ class CGroupsHandlerImpl implements CGroupsHandler {
   @Override
   public void initializeCGroupController(CGroupController controller) throws
       ResourceHandlerException {
-    if (enableCGroupMount) {
+    if (this.cGroupsMountConfig.isMountEnabled() &&
+        cGroupsMountConfig.ensureMountPathIsDefined()) {
       // We have a controller that needs to be mounted
       mountCGroupController(controller);
     }
@@ -465,10 +457,7 @@ class CGroupsHandlerImpl implements CGroupsHandler {
   public String createCGroup(CGroupController controller, String cGroupId)
       throws ResourceHandlerException {
     String path = getPathForCGroup(controller, cGroupId);
-
-    if (LOG.isDebugEnabled()) {
-      LOG.debug("createCgroup: " + path);
-    }
+    LOG.debug("createCgroup: {}", path);
 
     if (!new File(path).mkdir()) {
       throw new ResourceHandlerException("Failed to create cgroup at " + path);
@@ -488,7 +477,7 @@ class CGroupsHandlerImpl implements CGroupsHandler {
               + "/tasks"), "UTF-8"))) {
         str = inl.readLine();
         if (str != null) {
-          LOG.debug("First line in cgroup tasks file: " + cgf + " " + str);
+          LOG.debug("First line in cgroup tasks file: {} {}", cgf, str);
         }
       } catch (IOException e) {
         LOG.warn("Failed to read cgroup tasks file. ", e);
@@ -538,9 +527,7 @@ class CGroupsHandlerImpl implements CGroupsHandler {
     boolean deleted = false;
     String cGroupPath = getPathForCGroup(controller, cGroupId);
 
-    if (LOG.isDebugEnabled()) {
-      LOG.debug("deleteCGroup: " + cGroupPath);
-    }
+    LOG.debug("deleteCGroup: {}", cGroupPath);
 
     long start = clock.getTime();
 
@@ -567,11 +554,8 @@ class CGroupsHandlerImpl implements CGroupsHandler {
     String cGroupParamPath = getPathForCGroupParam(controller, cGroupId, param);
     PrintWriter pw = null;
 
-    if (LOG.isDebugEnabled()) {
-      LOG.debug(
-          String.format("updateCGroupParam for path: %s with value %s",
-              cGroupParamPath, value));
-    }
+    LOG.debug("updateCGroupParam for path: {} with value {}",
+        cGroupParamPath, value);
 
     try {
       File file = new File(cGroupParamPath);
@@ -620,7 +604,7 @@ class CGroupsHandlerImpl implements CGroupsHandler {
 
   @Override
   public String getCGroupMountPath() {
-    return cGroupMountPath;
+    return this.cGroupsMountConfig.getMountPath();
   }
 
   @Override
@@ -628,8 +612,7 @@ class CGroupsHandlerImpl implements CGroupsHandler {
     return CGroupsHandlerImpl.class.getName() + "{" +
         "mtabFile='" + mtabFile + '\'' +
         ", cGroupPrefix='" + cGroupPrefix + '\'' +
-        ", enableCGroupMount=" + enableCGroupMount +
-        ", cGroupMountPath='" + cGroupMountPath + '\'' +
+        ", cGroupsMountConfig=" + cGroupsMountConfig +
         ", deleteCGroupTimeout=" + deleteCGroupTimeout +
         ", deleteCGroupDelay=" + deleteCGroupDelay +
         '}';

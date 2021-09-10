@@ -27,6 +27,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -39,7 +40,8 @@ import javax.management.NotCompliantMBeanException;
 import javax.management.ObjectName;
 import javax.management.StandardMBean;
 
-import com.google.common.math.LongMath;
+import org.apache.hadoop.hdfs.server.datanode.fsdataset.impl.MountVolumeMap;
+import org.apache.hadoop.thirdparty.com.google.common.math.LongMath;
 import org.apache.commons.lang3.ArrayUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.DF;
@@ -414,6 +416,11 @@ public class SimulatedFSDataset implements FsDatasetSpi<FsVolumeSpi> {
       } while (deadLine > System.currentTimeMillis());
       throw new IOException("Minimum length was not achieved within timeout");
     }
+
+    @Override
+    public FsVolumeSpi getVolume() {
+      return getStorage(theBlock).getVolume();
+    }
   }
 
   /**
@@ -450,7 +457,7 @@ public class SimulatedFSDataset implements FsDatasetSpi<FsVolumeSpi> {
    * Class used for tracking datanode level storage utilization similar
    * to {@link FSVolumeSet}
    */
-  private static class SimulatedStorage {
+  static class SimulatedStorage {
     private final Map<String, SimulatedBPStorage> map =
         new ConcurrentHashMap<>();
 
@@ -597,11 +604,16 @@ public class SimulatedFSDataset implements FsDatasetSpi<FsVolumeSpi> {
 
     @Override
     public StorageType getStorageType() {
-      return null;
+      return StorageType.DISK;
     }
 
     @Override
     public boolean isTransientStorage() {
+      return false;
+    }
+
+    @Override
+    public boolean isRAMStorage() {
       return false;
     }
 
@@ -635,7 +647,11 @@ public class SimulatedFSDataset implements FsDatasetSpi<FsVolumeSpi> {
 
     @Override
     public StorageLocation getStorageLocation() {
-      return null;
+      try {
+        return StorageLocation.parse("[DISK]file:///simulated");
+      } catch (Exception e) {
+        return null;
+      }
     }
 
     @Override
@@ -680,6 +696,10 @@ public class SimulatedFSDataset implements FsDatasetSpi<FsVolumeSpi> {
   private final List<SimulatedStorage> storages;
   private final String datanodeUuid;
   private final DataNode datanode;
+
+  public List<SimulatedStorage> getStorages() {
+    return storages;
+  }
 
   public SimulatedFSDataset(DataStorage storage, Configuration conf) {
     this(null, storage, conf);
@@ -1169,7 +1189,7 @@ public class SimulatedFSDataset implements FsDatasetSpi<FsVolumeSpi> {
     return new ReplicaHandler(binfo, null);
   }
 
-  protected synchronized InputStream getBlockInputStream(ExtendedBlock b)
+  public synchronized InputStream getBlockInputStream(ExtendedBlock b)
       throws IOException {
     BInfo binfo = getBlockMap(b).get(b.getLocalBlock());
     if (binfo == null) {
@@ -1358,7 +1378,10 @@ public class SimulatedFSDataset implements FsDatasetSpi<FsVolumeSpi> {
 
   @Override
   public void shutdown() {
-    if (mbeanName != null) MBeans.unregister(mbeanName);
+    if (mbeanName != null) {
+      MBeans.unregister(mbeanName);
+      mbeanName = null;
+    }
   }
 
   @Override
@@ -1566,6 +1589,27 @@ public class SimulatedFSDataset implements FsDatasetSpi<FsVolumeSpi> {
   @Override
   public AutoCloseableLock acquireDatasetLock() {
     return datasetLock.acquire();
+  }
+
+  @Override
+  public AutoCloseableLock acquireDatasetReadLock() {
+    // No RW lock implementation in simulated dataset currently.
+    return datasetLock.acquire();
+  }
+
+  @Override
+  public Set<? extends Replica> deepCopyReplica(String bpid)
+      throws IOException {
+    Set<BInfo> replicas = new HashSet<>();
+    for (SimulatedStorage s : storages) {
+      replicas.addAll(s.getBlockMap(bpid).values());
+    }
+    return Collections.unmodifiableSet(replicas);
+  }
+
+  @Override
+  public MountVolumeMap getMountVolumeMap() {
+    return null;
   }
 }
 

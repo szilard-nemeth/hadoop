@@ -68,7 +68,7 @@ public class ContainerPBImpl extends Container {
     viaProto = true;
   }
   
-  public ContainerProto getProto() {
+  synchronized public ContainerProto getProto() {
   
     mergeLocalToProto();
     proto = viaProto ? proto : builder.build();
@@ -142,7 +142,7 @@ public class ContainerPBImpl extends Container {
   }
 
   @Override
-  public ContainerId getId() {
+  synchronized public ContainerId getId() {
     ContainerProtoOrBuilder p = viaProto ? proto : builder;
     if (this.containerId != null) {
       return this.containerId;
@@ -176,7 +176,7 @@ public class ContainerPBImpl extends Container {
   }
 
   @Override
-  public void setId(ContainerId id) {
+  synchronized public void setId(ContainerId id) {
     maybeInitBuilder();
     if (id == null)
       builder.clearId();
@@ -404,18 +404,18 @@ public class ContainerPBImpl extends Container {
 
   public String toString() {
     StringBuilder sb = new StringBuilder();
-    sb.append("Container: [");
-    sb.append("ContainerId: ").append(getId()).append(", ");
-    sb.append("AllocationRequestId: ").append(getAllocationRequestId())
-        .append(", ");
-    sb.append("Version: ").append(getVersion()).append(", ");
-    sb.append("NodeId: ").append(getNodeId()).append(", ");
-    sb.append("NodeHttpAddress: ").append(getNodeHttpAddress()).append(", ");
-    sb.append("Resource: ").append(getResource()).append(", ");
-    sb.append("Priority: ").append(getPriority()).append(", ");
-    sb.append("Token: ").append(getContainerToken()).append(", ");
-    sb.append("ExecutionType: ").append(getExecutionType()).append(", ");
-    sb.append("]");
+    sb.append("Container: [")
+        .append("ContainerId: ").append(getId()).append(", ")
+        .append("AllocationRequestId: ").append(getAllocationRequestId())
+        .append(", ")
+        .append("Version: ").append(getVersion()).append(", ")
+        .append("NodeId: ").append(getNodeId()).append(", ")
+        .append("NodeHttpAddress: ").append(getNodeHttpAddress()).append(", ")
+        .append("Resource: ").append(getResource()).append(", ")
+        .append("Priority: ").append(getPriority()).append(", ")
+        .append("Token: ").append(getContainerToken()).append(", ")
+        .append("ExecutionType: ").append(getExecutionType()).append(", ")
+        .append("]");
     return sb.toString();
   }
 

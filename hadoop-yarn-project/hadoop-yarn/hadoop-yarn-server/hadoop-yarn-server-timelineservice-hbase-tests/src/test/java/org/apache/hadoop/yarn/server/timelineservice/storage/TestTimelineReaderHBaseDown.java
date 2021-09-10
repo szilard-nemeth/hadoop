@@ -34,8 +34,8 @@ import java.util.Set;
 import java.util.concurrent.TimeoutException;
 
 import static org.apache.hadoop.yarn.conf.YarnConfiguration.TIMELINE_SERVICE_READER_STORAGE_MONITOR_INTERVAL_MS;
-import static org.apache.hadoop.yarn.server.timelineservice.storage.HBaseTimelineReaderImpl.DATA_TO_RETRIEVE;
-import static org.apache.hadoop.yarn.server.timelineservice.storage.HBaseTimelineReaderImpl.MONITOR_FILTERS;
+import static org.apache.hadoop.yarn.server.timelineservice.storage.HBaseStorageMonitor.DATA_TO_RETRIEVE;
+import static org.apache.hadoop.yarn.server.timelineservice.storage.HBaseStorageMonitor.MONITOR_FILTERS;
 
 public class TestTimelineReaderHBaseDown {
 
@@ -150,7 +150,14 @@ public class TestTimelineReaderHBaseDown {
       waitForHBaseDown(htr);
 
       util.startMiniHBaseCluster(1, 1);
-      GenericTestUtils.waitFor(() -> !htr.isHBaseDown(), 1000, 150000);
+      GenericTestUtils.waitFor(() -> {
+        try {
+          htr.getTimelineStorageMonitor().checkStorageIsUp();
+          return true;
+        } catch (IOException e) {
+          return false;
+        }
+      }, 1000, 150000);
     } finally {
       util.shutdownMiniCluster();
     }
@@ -158,8 +165,15 @@ public class TestTimelineReaderHBaseDown {
 
   private static void waitForHBaseDown(HBaseTimelineReaderImpl htr) throws
       TimeoutException, InterruptedException {
-    GenericTestUtils.waitFor(() -> htr.isHBaseDown(), 1000, 150000);
     try {
+      GenericTestUtils.waitFor(() -> {
+        try {
+          htr.getTimelineStorageMonitor().checkStorageIsUp();
+          return false;
+        } catch (IOException e) {
+          return true;
+        }
+      }, 1000, 150000);
       checkQuery(htr);
       Assert.fail("Query should fail when HBase is down");
     } catch (IOException e) {
@@ -167,14 +181,13 @@ public class TestTimelineReaderHBaseDown {
     }
   }
 
-  private static void checkQuery(HBaseTimelineReaderImpl htr) throws
-      IOException {
+  private static Set<TimelineEntity> checkQuery(HBaseTimelineReaderImpl htr)
+      throws IOException {
     TimelineReaderContext context =
         new TimelineReaderContext(YarnConfiguration.DEFAULT_RM_CLUSTER_ID,
             null, null, null, null, TimelineEntityType
             .YARN_FLOW_ACTIVITY.toString(), null, null);
-    Set<TimelineEntity> entities = htr.getEntities(context, MONITOR_FILTERS,
-        DATA_TO_RETRIEVE);
+    return htr.getEntities(context, MONITOR_FILTERS, DATA_TO_RETRIEVE);
   }
 
   private static void configure(HBaseTestingUtility util) {

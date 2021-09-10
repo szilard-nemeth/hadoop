@@ -25,7 +25,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
 
 import org.apache.commons.lang3.StringUtils;
 
@@ -139,7 +139,7 @@ public class KeyShell extends CommandShell {
         }
         if (attributes.containsKey(attr)) {
           getOut().println("\nEach attribute must correspond to only one " +
-              "value:\natttribute \"" + attr + "\" was repeated\n");
+              "value:\nattribute \"" + attr + "\" was repeated\n");
           return 1;
         }
         attributes.put(attr, val);

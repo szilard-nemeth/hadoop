@@ -17,9 +17,12 @@
  */
 package org.apache.hadoop.hdfs.server.federation.router;
 
+import static org.apache.hadoop.hdfs.client.HdfsClientConfigKeys.DFS_CLIENT_SERVER_DEFAULTS_VALIDITY_PERIOD_MS_DEFAULT;
+import static org.apache.hadoop.hdfs.client.HdfsClientConfigKeys.DFS_CLIENT_SERVER_DEFAULTS_VALIDITY_PERIOD_MS_KEY;
+import static org.apache.hadoop.hdfs.server.federation.router.FederationUtil.updateMountPointStatus;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.crypto.CryptoProtocolVersion;
-import org.apache.hadoop.fs.BatchedRemoteIterator;
+import org.apache.hadoop.fs.BatchedRemoteIterator.BatchedEntries;
 import org.apache.hadoop.fs.CacheFlag;
 import org.apache.hadoop.fs.ContentSummary;
 import org.apache.hadoop.fs.CreateFlag;
@@ -40,6 +43,7 @@ import org.apache.hadoop.hdfs.DFSConfigKeys;
 import org.apache.hadoop.hdfs.DFSUtil;
 import org.apache.hadoop.hdfs.inotify.EventBatchList;
 import org.apache.hadoop.hdfs.protocol.AddErasureCodingPolicyResponse;
+import org.apache.hadoop.hdfs.protocol.BatchedDirectoryListing;
 import org.apache.hadoop.hdfs.protocol.BlockStoragePolicy;
 import org.apache.hadoop.hdfs.protocol.CacheDirectiveEntry;
 import org.apache.hadoop.hdfs.protocol.CacheDirectiveInfo;
@@ -51,6 +55,7 @@ import org.apache.hadoop.hdfs.protocol.DatanodeID;
 import org.apache.hadoop.hdfs.protocol.DatanodeInfo;
 import org.apache.hadoop.hdfs.protocol.DirectoryListing;
 import org.apache.hadoop.hdfs.protocol.ECBlockGroupStats;
+import org.apache.hadoop.hdfs.protocol.ECTopologyVerifierResult;
 import org.apache.hadoop.hdfs.protocol.EncryptionZone;
 import org.apache.hadoop.hdfs.protocol.ErasureCodingPolicy;
 import org.apache.hadoop.hdfs.protocol.ErasureCodingPolicyInfo;
@@ -68,6 +73,8 @@ import org.apache.hadoop.hdfs.protocol.RollingUpgradeInfo;
 import org.apache.hadoop.hdfs.protocol.SnapshotDiffReport;
 import org.apache.hadoop.hdfs.protocol.SnapshotDiffReportListing;
 import org.apache.hadoop.hdfs.protocol.SnapshottableDirectoryStatus;
+import org.apache.hadoop.hdfs.protocol.SnapshotStatus;
+import org.apache.hadoop.hdfs.protocol.UnresolvedPathException;
 import org.apache.hadoop.hdfs.protocol.ZoneReencryptionStatus;
 import org.apache.hadoop.hdfs.security.token.block.DataEncryptionKey;
 import org.apache.hadoop.hdfs.security.token.delegation.DelegationTokenIdentifier;
@@ -76,19 +83,28 @@ import org.apache.hadoop.hdfs.server.federation.resolver.FederationNamespaceInfo
 import org.apache.hadoop.hdfs.server.federation.resolver.FileSubclusterResolver;
 import org.apache.hadoop.hdfs.server.federation.resolver.MountTableResolver;
 import org.apache.hadoop.hdfs.server.federation.resolver.RemoteLocation;
+import org.apache.hadoop.hdfs.server.federation.resolver.RouterResolveException;
+import org.apache.hadoop.hdfs.server.federation.router.security.RouterSecurityManager;
 import org.apache.hadoop.hdfs.server.federation.store.records.MountTable;
 import org.apache.hadoop.hdfs.server.namenode.NameNode;
 import org.apache.hadoop.hdfs.server.protocol.DatanodeStorageReport;
 import org.apache.hadoop.io.EnumSetWritable;
 import org.apache.hadoop.io.Text;
+import org.apache.hadoop.net.ConnectTimeoutException;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.security.token.Token;
+import org.apache.hadoop.util.Time;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
+
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.net.ConnectException;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.Iterator;
@@ -98,6 +114,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Module that implements all the RPC calls in {@link ClientProtocol} in the
@@ -109,15 +126,38 @@ public class RouterClientProtocol implements ClientProtocol {
 
   private final RouterRpcServer rpcServer;
   private final RouterRpcClient rpcClient;
+  private final RouterFederationRename rbfRename;
   private final FileSubclusterResolver subclusterResolver;
   private final ActiveNamenodeResolver namenodeResolver;
 
+  /**
+   * Caching server defaults so as to prevent redundant calls to namenode,
+   * similar to DFSClient, caching saves efforts when router connects
+   * to multiple clients.
+   */
+  private volatile FsServerDefaults serverDefaults;
+  private volatile long serverDefaultsLastUpdate;
+  private final long serverDefaultsValidityPeriod;
+
+  /** If it requires response from all subclusters. */
+  private final boolean allowPartialList;
+  /** Time out when getting the mount statistics. */
+  private long mountStatusTimeOut;
+
   /** Identifier for the super user. */
-  private final String superUser;
+  private String superUser;
   /** Identifier for the super group. */
   private final String superGroup;
   /** Erasure coding calls. */
   private final ErasureCoding erasureCoding;
+  /** Cache Admin calls. */
+  private final RouterCacheAdmin routerCacheAdmin;
+  /** StoragePolicy calls. **/
+  private final RouterStoragePolicy storagePolicy;
+  /** Snapshot calls. */
+  private final RouterSnapshot snapshotProto;
+  /** Router security manager to handle token operations. */
+  private RouterSecurityManager securityManager = null;
 
   RouterClientProtocol(Configuration conf, RouterRpcServer rpcServer) {
     this.rpcServer = rpcServer;
@@ -125,19 +165,41 @@ public class RouterClientProtocol implements ClientProtocol {
     this.subclusterResolver = rpcServer.getSubclusterResolver();
     this.namenodeResolver = rpcServer.getNamenodeResolver();
 
+    this.allowPartialList = conf.getBoolean(
+        RBFConfigKeys.DFS_ROUTER_ALLOW_PARTIAL_LIST,
+        RBFConfigKeys.DFS_ROUTER_ALLOW_PARTIAL_LIST_DEFAULT);
+    this.mountStatusTimeOut = conf.getTimeDuration(
+        RBFConfigKeys.DFS_ROUTER_CLIENT_MOUNT_TIME_OUT,
+        RBFConfigKeys.DFS_ROUTER_CLIENT_MOUNT_TIME_OUT_DEFAULT,
+        TimeUnit.MILLISECONDS);
+    this.serverDefaultsValidityPeriod = conf.getTimeDuration(
+        DFS_CLIENT_SERVER_DEFAULTS_VALIDITY_PERIOD_MS_KEY,
+        DFS_CLIENT_SERVER_DEFAULTS_VALIDITY_PERIOD_MS_DEFAULT,
+        TimeUnit.MILLISECONDS);
     // User and group for reporting
-    this.superUser = System.getProperty("user.name");
+    try {
+      this.superUser = UserGroupInformation.getCurrentUser().getShortUserName();
+    } catch (IOException ex) {
+      LOG.warn("Unable to get user name. Fall back to system property " +
+          "user.name", ex);
+      this.superUser = System.getProperty("user.name");
+    }
     this.superGroup = conf.get(
         DFSConfigKeys.DFS_PERMISSIONS_SUPERUSERGROUP_KEY,
         DFSConfigKeys.DFS_PERMISSIONS_SUPERUSERGROUP_DEFAULT);
     this.erasureCoding = new ErasureCoding(rpcServer);
+    this.storagePolicy = new RouterStoragePolicy(rpcServer);
+    this.snapshotProto = new RouterSnapshot(rpcServer);
+    this.routerCacheAdmin = new RouterCacheAdmin(rpcServer);
+    this.securityManager = rpcServer.getRouterSecurityManager();
+    this.rbfRename = new RouterFederationRename(rpcServer, conf);
   }
 
   @Override
   public Token<DelegationTokenIdentifier> getDelegationToken(Text renewer)
       throws IOException {
-    rpcServer.checkOperation(NameNode.OperationCategory.WRITE, false);
-    return null;
+    rpcServer.checkOperation(NameNode.OperationCategory.WRITE, true);
+    return this.securityManager.getDelegationToken(renewer);
   }
 
   /**
@@ -156,14 +218,16 @@ public class RouterClientProtocol implements ClientProtocol {
   @Override
   public long renewDelegationToken(Token<DelegationTokenIdentifier> token)
       throws IOException {
-    rpcServer.checkOperation(NameNode.OperationCategory.WRITE, false);
-    return 0;
+    rpcServer.checkOperation(NameNode.OperationCategory.WRITE, true);
+    return this.securityManager.renewDelegationToken(token);
   }
 
   @Override
   public void cancelDelegationToken(Token<DelegationTokenIdentifier> token)
       throws IOException {
-    rpcServer.checkOperation(NameNode.OperationCategory.WRITE, false);
+    rpcServer.checkOperation(NameNode.OperationCategory.WRITE, true);
+    this.securityManager.cancelDelegationToken(token);
+    return;
   }
 
   @Override
@@ -171,7 +235,8 @@ public class RouterClientProtocol implements ClientProtocol {
       final long length) throws IOException {
     rpcServer.checkOperation(NameNode.OperationCategory.READ);
 
-    List<RemoteLocation> locations = rpcServer.getLocationsForPath(src, false);
+    List<RemoteLocation> locations =
+        rpcServer.getLocationsForPath(src, false, false);
     RemoteMethod remoteMethod = new RemoteMethod("getBlockLocations",
         new Class<?>[] {String.class, long.class, long.class},
         new RemoteParam(), offset, length);
@@ -182,10 +247,15 @@ public class RouterClientProtocol implements ClientProtocol {
   @Override
   public FsServerDefaults getServerDefaults() throws IOException {
     rpcServer.checkOperation(NameNode.OperationCategory.READ);
-
-    RemoteMethod method = new RemoteMethod("getServerDefaults");
-    String ns = subclusterResolver.getDefaultNamespace();
-    return (FsServerDefaults) rpcClient.invokeSingle(ns, method);
+    long now = Time.monotonicNow();
+    if ((serverDefaults == null) || (now - serverDefaultsLastUpdate
+        > serverDefaultsValidityPeriod)) {
+      RemoteMethod method = new RemoteMethod("getServerDefaults");
+      serverDefaults =
+          rpcServer.invokeAtAvailableNs(method, FsServerDefaults.class);
+      serverDefaultsLastUpdate = now;
+    }
+    return serverDefaults;
   }
 
   @Override
@@ -197,7 +267,7 @@ public class RouterClientProtocol implements ClientProtocol {
       throws IOException {
     rpcServer.checkOperation(NameNode.OperationCategory.WRITE);
 
-    if (createParent && isPathAll(src)) {
+    if (createParent && rpcServer.isPathAll(src)) {
       int index = src.lastIndexOf(Path.SEPARATOR);
       String parent = src.substring(0, index);
       LOG.debug("Creating {} requires creating parent {}", src, parent);
@@ -209,15 +279,93 @@ public class RouterClientProtocol implements ClientProtocol {
       }
     }
 
-    RemoteLocation createLocation = rpcServer.getCreateLocation(src);
     RemoteMethod method = new RemoteMethod("create",
         new Class<?>[] {String.class, FsPermission.class, String.class,
             EnumSetWritable.class, boolean.class, short.class,
             long.class, CryptoProtocolVersion[].class,
             String.class, String.class},
-        createLocation.getDest(), masked, clientName, flag, createParent,
+        new RemoteParam(), masked, clientName, flag, createParent,
         replication, blockSize, supportedVersions, ecPolicyName, storagePolicy);
-    return (HdfsFileStatus) rpcClient.invokeSingle(createLocation, method);
+    final List<RemoteLocation> locations =
+        rpcServer.getLocationsForPath(src, true);
+    RemoteLocation createLocation = null;
+    try {
+      createLocation = rpcServer.getCreateLocation(src, locations);
+      return rpcClient.invokeSingle(createLocation, method,
+          HdfsFileStatus.class);
+    } catch (IOException ioe) {
+      final List<RemoteLocation> newLocations = checkFaultTolerantRetry(
+          method, src, ioe, createLocation, locations);
+      return rpcClient.invokeSequential(
+          newLocations, method, HdfsFileStatus.class, null);
+    }
+  }
+
+  /**
+   * Check if an exception is caused by an unavailable subcluster or not. It
+   * also checks the causes.
+   * @param ioe IOException to check.
+   * @return If caused by an unavailable subcluster. False if the should not be
+   *         retried (e.g., NSQuotaExceededException).
+   */
+  protected static boolean isUnavailableSubclusterException(
+      final IOException ioe) {
+    if (ioe instanceof ConnectException ||
+        ioe instanceof ConnectTimeoutException ||
+        ioe instanceof NoNamenodesAvailableException) {
+      return true;
+    }
+    if (ioe.getCause() instanceof IOException) {
+      IOException cause = (IOException)ioe.getCause();
+      return isUnavailableSubclusterException(cause);
+    }
+    return false;
+  }
+
+  /**
+   * Check if a remote method can be retried in other subclusters when it
+   * failed in the original destination. This method returns the list of
+   * locations to retry in. This is used by fault tolerant mount points.
+   * @param method Method that failed and might be retried.
+   * @param src Path where the method was invoked.
+   * @param ioe Exception that was triggered.
+   * @param excludeLoc Location that failed and should be excluded.
+   * @param locations All the locations to retry.
+   * @return The locations where we should retry (excluding the failed ones).
+   * @throws IOException If this path is not fault tolerant or the exception
+   *                     should not be retried (e.g., NSQuotaExceededException).
+   */
+  private List<RemoteLocation> checkFaultTolerantRetry(
+      final RemoteMethod method, final String src, final IOException ioe,
+      final RemoteLocation excludeLoc, final List<RemoteLocation> locations)
+          throws IOException {
+
+    if (!isUnavailableSubclusterException(ioe)) {
+      LOG.debug("{} exception cannot be retried",
+          ioe.getClass().getSimpleName());
+      throw ioe;
+    }
+    if (!rpcServer.isPathFaultTolerant(src)) {
+      LOG.debug("{} does not allow retrying a failed subcluster", src);
+      throw ioe;
+    }
+
+    final List<RemoteLocation> newLocations;
+    if (excludeLoc == null) {
+      LOG.error("Cannot invoke {} for {}: {}", method, src, ioe.getMessage());
+      newLocations = locations;
+    } else {
+      LOG.error("Cannot invoke {} for {} in {}: {}",
+          method, src, excludeLoc, ioe.getMessage());
+      newLocations = new ArrayList<>();
+      for (final RemoteLocation loc : locations) {
+        if (!loc.equals(excludeLoc)) {
+          newLocations.add(loc);
+        }
+      }
+    }
+    LOG.info("{} allows retrying failed subclusters in {}", src, newLocations);
+    return newLocations;
   }
 
   @Override
@@ -239,12 +387,12 @@ public class RouterClientProtocol implements ClientProtocol {
     rpcServer.checkOperation(NameNode.OperationCategory.WRITE);
 
     final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(src, true);
+        rpcServer.getLocationsForPath(src, true, false);
     RemoteMethod method = new RemoteMethod("recoverLease",
         new Class<?>[] {String.class, String.class}, new RemoteParam(),
         clientName);
     Object result = rpcClient.invokeSequential(
-        locations, method, Boolean.class, Boolean.TRUE);
+        locations, method, Boolean.class, null);
     return (boolean) result;
   }
 
@@ -257,30 +405,24 @@ public class RouterClientProtocol implements ClientProtocol {
     RemoteMethod method = new RemoteMethod("setReplication",
         new Class<?>[] {String.class, short.class}, new RemoteParam(),
         replication);
-    Object result = rpcClient.invokeSequential(
-        locations, method, Boolean.class, Boolean.TRUE);
-    return (boolean) result;
+    if (rpcServer.isInvokeConcurrent(src)) {
+      return !rpcClient.invokeConcurrent(locations, method, Boolean.class)
+          .containsValue(false);
+    } else {
+      return rpcClient.invokeSequential(locations, method, Boolean.class,
+          Boolean.TRUE);
+    }
   }
 
   @Override
   public void setStoragePolicy(String src, String policyName)
       throws IOException {
-    rpcServer.checkOperation(NameNode.OperationCategory.WRITE);
-
-    List<RemoteLocation> locations = rpcServer.getLocationsForPath(src, true);
-    RemoteMethod method = new RemoteMethod("setStoragePolicy",
-        new Class<?>[] {String.class, String.class},
-        new RemoteParam(), policyName);
-    rpcClient.invokeSequential(locations, method, null, null);
+    storagePolicy.setStoragePolicy(src, policyName);
   }
 
   @Override
   public BlockStoragePolicy[] getStoragePolicies() throws IOException {
-    rpcServer.checkOperation(NameNode.OperationCategory.READ);
-
-    RemoteMethod method = new RemoteMethod("getStoragePolicies");
-    String ns = subclusterResolver.getDefaultNamespace();
-    return (BlockStoragePolicy[]) rpcClient.invokeSingle(ns, method);
+    return storagePolicy.getStoragePolicies();
   }
 
   @Override
@@ -289,11 +431,11 @@ public class RouterClientProtocol implements ClientProtocol {
     rpcServer.checkOperation(NameNode.OperationCategory.WRITE);
 
     final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(src, true);
+        rpcServer.getLocationsForPath(src, false, false);
     RemoteMethod method = new RemoteMethod("setPermission",
         new Class<?>[] {String.class, FsPermission.class},
         new RemoteParam(), permissions);
-    if (isPathAll(src)) {
+    if (rpcServer.isInvokeConcurrent(src)) {
       rpcClient.invokeConcurrent(locations, method);
     } else {
       rpcClient.invokeSequential(locations, method);
@@ -306,11 +448,11 @@ public class RouterClientProtocol implements ClientProtocol {
     rpcServer.checkOperation(NameNode.OperationCategory.WRITE);
 
     final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(src, true);
+        rpcServer.getLocationsForPath(src, false, false);
     RemoteMethod method = new RemoteMethod("setOwner",
         new Class<?>[] {String.class, String.class, String.class},
         new RemoteParam(), username, groupname);
-    if (isPathAll(src)) {
+    if (rpcServer.isInvokeConcurrent(src)) {
       rpcClient.invokeConcurrent(locations, method);
     } else {
       rpcClient.invokeSequential(locations, method);
@@ -328,14 +470,19 @@ public class RouterClientProtocol implements ClientProtocol {
       throws IOException {
     rpcServer.checkOperation(NameNode.OperationCategory.WRITE);
 
-    final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(src, true);
     RemoteMethod method = new RemoteMethod("addBlock",
         new Class<?>[] {String.class, String.class, ExtendedBlock.class,
             DatanodeInfo[].class, long.class, String[].class,
             EnumSet.class},
         new RemoteParam(), clientName, previous, excludedNodes, fileId,
         favoredNodes, addBlockFlags);
+
+    if (previous != null) {
+      return rpcClient.invokeSingle(previous, method, LocatedBlock.class);
+    }
+
+    final List<RemoteLocation> locations =
+        rpcServer.getLocationsForPath(src, true);
     // TODO verify the excludedNodes and favoredNodes are acceptable to this NN
     return rpcClient.invokeSequential(
         locations, method, LocatedBlock.class, null);
@@ -353,14 +500,19 @@ public class RouterClientProtocol implements ClientProtocol {
       throws IOException {
     rpcServer.checkOperation(NameNode.OperationCategory.READ);
 
-    final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(src, false);
     RemoteMethod method = new RemoteMethod("getAdditionalDatanode",
         new Class<?>[] {String.class, long.class, ExtendedBlock.class,
             DatanodeInfo[].class, String[].class,
             DatanodeInfo[].class, int.class, String.class},
         new RemoteParam(), fileId, blk, existings, existingStorageIDs, excludes,
         numAdditionalNodes, clientName);
+
+    if (blk != null) {
+      return rpcClient.invokeSingle(blk, method, LocatedBlock.class);
+    }
+
+    final List<RemoteLocation> locations =
+        rpcServer.getLocationsForPath(src, false);
     return rpcClient.invokeSequential(
         locations, method, LocatedBlock.class, null);
   }
@@ -382,12 +534,17 @@ public class RouterClientProtocol implements ClientProtocol {
       long fileId) throws IOException {
     rpcServer.checkOperation(NameNode.OperationCategory.WRITE);
 
-    final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(src, true);
     RemoteMethod method = new RemoteMethod("complete",
         new Class<?>[] {String.class, String.class, ExtendedBlock.class,
             long.class},
         new RemoteParam(), clientName, last, fileId);
+
+    if (last != null) {
+      return rpcClient.invokeSingle(last, method, Boolean.class);
+    }
+
+    final List<RemoteLocation> locations =
+        rpcServer.getLocationsForPath(src, true);
     // Complete can return true/false, so don't expect a result
     return rpcClient.invokeSequential(locations, method, Boolean.class, null);
   }
@@ -400,7 +557,7 @@ public class RouterClientProtocol implements ClientProtocol {
     RemoteMethod method = new RemoteMethod("updateBlockForPipeline",
         new Class<?>[] {ExtendedBlock.class, String.class},
         block, clientName);
-    return (LocatedBlock) rpcClient.invokeSingle(block, method);
+    return rpcClient.invokeSingle(block, method, LocatedBlock.class);
   }
 
   /**
@@ -425,7 +582,7 @@ public class RouterClientProtocol implements ClientProtocol {
     rpcServer.checkOperation(NameNode.OperationCategory.READ);
 
     final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(src, true);
+        rpcServer.getLocationsForPath(src, true, false);
     RemoteMethod method = new RemoteMethod("getPreferredBlockSize",
         new Class<?>[] {String.class}, new RemoteParam());
     return rpcClient.invokeSequential(locations, method, Long.class, null);
@@ -439,19 +596,23 @@ public class RouterClientProtocol implements ClientProtocol {
 
     final List<RemoteLocation> srcLocations =
         rpcServer.getLocationsForPath(src, true, false);
+    final List<RemoteLocation> dstLocations =
+        rpcServer.getLocationsForPath(dst, false, false);
     // srcLocations may be trimmed by getRenameDestinations()
     final List<RemoteLocation> locs = new LinkedList<>(srcLocations);
-    RemoteParam dstParam = getRenameDestinations(locs, dst);
+    RemoteParam dstParam = getRenameDestinations(locs, dstLocations);
     if (locs.isEmpty()) {
-      throw new IOException(
-          "Rename of " + src + " to " + dst + " is not allowed," +
-              " no eligible destination in the same namespace was found.");
+      return rbfRename.routerFedRename(src, dst, srcLocations, dstLocations);
     }
     RemoteMethod method = new RemoteMethod("rename",
         new Class<?>[] {String.class, String.class},
         new RemoteParam(), dstParam);
-    return rpcClient.invokeSequential(locs, method, Boolean.class,
-        Boolean.TRUE);
+    if (isMultiDestDirectory(src)) {
+      return rpcClient.invokeAll(locs, method);
+    } else {
+      return rpcClient.invokeSequential(locs, method, Boolean.class,
+          Boolean.TRUE);
+    }
   }
 
   @Override
@@ -461,18 +622,23 @@ public class RouterClientProtocol implements ClientProtocol {
 
     final List<RemoteLocation> srcLocations =
         rpcServer.getLocationsForPath(src, true, false);
+    final List<RemoteLocation> dstLocations =
+        rpcServer.getLocationsForPath(dst, false, false);
     // srcLocations may be trimmed by getRenameDestinations()
     final List<RemoteLocation> locs = new LinkedList<>(srcLocations);
-    RemoteParam dstParam = getRenameDestinations(locs, dst);
+    RemoteParam dstParam = getRenameDestinations(locs, dstLocations);
     if (locs.isEmpty()) {
-      throw new IOException(
-          "Rename of " + src + " to " + dst + " is not allowed," +
-              " no eligible destination in the same namespace was found.");
+      rbfRename.routerFedRename(src, dst, srcLocations, dstLocations);
+      return;
     }
     RemoteMethod method = new RemoteMethod("rename2",
         new Class<?>[] {String.class, String.class, options.getClass()},
         new RemoteParam(), dstParam, options);
-    rpcClient.invokeSequential(locs, method, null, null);
+    if (isMultiDestDirectory(src)) {
+      rpcClient.invokeConcurrent(locs, method);
+    } else {
+      rpcClient.invokeSequential(locs, method, null, null);
+    }
   }
 
   @Override
@@ -517,7 +683,7 @@ public class RouterClientProtocol implements ClientProtocol {
     RemoteMethod method = new RemoteMethod("concat",
         new Class<?>[] {String.class, String[].class},
         targetDestination.getDest(), sourceDestinations);
-    rpcClient.invokeSingle(targetDestination, method);
+    rpcClient.invokeSingle(targetDestination, method, Void.class);
   }
 
   @Override
@@ -543,7 +709,7 @@ public class RouterClientProtocol implements ClientProtocol {
     RemoteMethod method = new RemoteMethod("delete",
         new Class<?>[] {String.class, boolean.class}, new RemoteParam(),
         recursive);
-    if (isPathAll(src)) {
+    if (rpcServer.isPathAll(src)) {
       return rpcClient.invokeAll(locations, method);
     } else {
       return rpcClient.invokeSequential(locations, method,
@@ -557,13 +723,13 @@ public class RouterClientProtocol implements ClientProtocol {
     rpcServer.checkOperation(NameNode.OperationCategory.WRITE);
 
     final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(src, true);
+        rpcServer.getLocationsForPath(src, false);
     RemoteMethod method = new RemoteMethod("mkdirs",
         new Class<?>[] {String.class, FsPermission.class, boolean.class},
         new RemoteParam(), masked, createParent);
 
     // Create in all locations
-    if (isPathAll(src)) {
+    if (rpcServer.isPathAll(src)) {
       return rpcClient.invokeAll(locations, method);
     }
 
@@ -577,13 +743,20 @@ public class RouterClientProtocol implements ClientProtocol {
         }
       } catch (IOException ioe) {
         // Can't query if this file exists or not.
-        LOG.error("Error requesting file info for path {} while proxing mkdirs",
-            src, ioe);
+        LOG.error("Error getting file info for {} while proxying mkdirs: {}",
+            src, ioe.getMessage());
       }
     }
 
-    RemoteLocation firstLocation = locations.get(0);
-    return (boolean) rpcClient.invokeSingle(firstLocation, method);
+    final RemoteLocation firstLocation = locations.get(0);
+    try {
+      return rpcClient.invokeSingle(firstLocation, method, Boolean.class);
+    } catch (IOException ioe) {
+      final List<RemoteLocation> newLocations = checkFaultTolerantRetry(
+          method, src, ioe, firstLocation, locations);
+      return rpcClient.invokeSequential(
+          newLocations, method, Boolean.class, Boolean.TRUE);
+    }
   }
 
   @Override
@@ -601,30 +774,27 @@ public class RouterClientProtocol implements ClientProtocol {
       boolean needLocation) throws IOException {
     rpcServer.checkOperation(NameNode.OperationCategory.READ);
 
-    // Locate the dir and fetch the listing
-    final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(src, true);
-    RemoteMethod method = new RemoteMethod("getListing",
-        new Class<?>[] {String.class, startAfter.getClass(), boolean.class},
-        new RemoteParam(), startAfter, needLocation);
-    Map<RemoteLocation, DirectoryListing> listings =
-        rpcClient.invokeConcurrent(
-            locations, method, false, false, DirectoryListing.class);
-
-    Map<String, HdfsFileStatus> nnListing = new TreeMap<>();
+    List<RemoteResult<RemoteLocation, DirectoryListing>> listings =
+        getListingInt(src, startAfter, needLocation);
+    TreeMap<String, HdfsFileStatus> nnListing = new TreeMap<>();
     int totalRemainingEntries = 0;
     int remainingEntries = 0;
     boolean namenodeListingExists = false;
+    // Check the subcluster listing with the smallest name to make sure
+    // no file is skipped across subclusters
+    String lastName = null;
     if (listings != null) {
-      // Check the subcluster listing with the smallest name
-      String lastName = null;
-      for (Map.Entry<RemoteLocation, DirectoryListing> entry :
-          listings.entrySet()) {
-        RemoteLocation location = entry.getKey();
-        DirectoryListing listing = entry.getValue();
-        if (listing == null) {
-          LOG.debug("Cannot get listing from {}", location);
-        } else {
+      for (RemoteResult<RemoteLocation, DirectoryListing> result : listings) {
+        if (result.hasException()) {
+          IOException ioe = result.getException();
+          if (ioe instanceof FileNotFoundException) {
+            RemoteLocation location = result.getLocation();
+            LOG.debug("Cannot get listing from {}", location);
+          } else if (!allowPartialList) {
+            throw ioe;
+          }
+        } else if (result.getResult() != null) {
+          DirectoryListing listing = result.getResult();
           totalRemainingEntries += listing.getRemainingEntries();
           HdfsFileStatus[] partialListing = listing.getPartialListing();
           int length = partialListing.length;
@@ -639,13 +809,14 @@ public class RouterClientProtocol implements ClientProtocol {
       }
 
       // Add existing entries
-      for (Object value : listings.values()) {
-        DirectoryListing listing = (DirectoryListing) value;
+      for (RemoteResult<RemoteLocation, DirectoryListing> result : listings) {
+        DirectoryListing listing = result.getResult();
         if (listing != null) {
           namenodeListingExists = true;
           for (HdfsFileStatus file : listing.getPartialListing()) {
             String filename = file.getLocalName();
-            if (totalRemainingEntries > 0 && filename.compareTo(lastName) > 0) {
+            if (totalRemainingEntries > 0 &&
+                filename.compareTo(lastName) > 0) {
               // Discarding entries further than the lastName
               remainingEntries++;
             } else {
@@ -659,6 +830,10 @@ public class RouterClientProtocol implements ClientProtocol {
 
     // Add mount points at this level in the tree
     final List<String> children = subclusterResolver.getMountPoints(src);
+    // Sort the list as the entries from subcluster are also sorted
+    if (children != null) {
+      Collections.sort(children);
+    }
     if (children != null) {
       // Get the dates for each mount point
       Map<String, Long> dates = getMountPointDates(src);
@@ -669,12 +844,31 @@ public class RouterClientProtocol implements ClientProtocol {
         if (dates != null && dates.containsKey(child)) {
           date = dates.get(child);
         }
-        // TODO add number of children
-        HdfsFileStatus dirStatus = getMountPointStatus(child, 0, date);
+        Path childPath = new Path(src, child);
+        HdfsFileStatus dirStatus =
+            getMountPointStatus(childPath.toString(), 0, date);
 
-        // This may overwrite existing listing entries with the mount point
-        // TODO don't add if already there?
-        nnListing.put(child, dirStatus);
+        // if there is no subcluster path, always add mount point
+        if (lastName == null) {
+          nnListing.put(child, dirStatus);
+        } else {
+          if (shouldAddMountPoint(child,
+                lastName, startAfter, remainingEntries)) {
+            // This may overwrite existing listing entries with the mount point
+            // TODO don't add if already there?
+            nnListing.put(child, dirStatus);
+          }
+        }
+      }
+      // Update the remaining count to include left mount points
+      if (nnListing.size() > 0) {
+        String lastListing = nnListing.lastKey();
+        for (int i = 0; i < children.size(); i++) {
+          if (children.get(i).compareTo(lastListing) > 0) {
+            remainingEntries += (children.size() - i);
+            break;
+          }
+        }
       }
     }
 
@@ -692,17 +886,23 @@ public class RouterClientProtocol implements ClientProtocol {
   }
 
   @Override
+  public BatchedDirectoryListing getBatchedListing(String[] srcs,
+      byte[] startAfter, boolean needLocation) throws IOException {
+    throw new UnsupportedOperationException("Not implemented");
+  }
+
+  @Override
   public HdfsFileStatus getFileInfo(String src) throws IOException {
     rpcServer.checkOperation(NameNode.OperationCategory.READ);
 
     final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(src, false);
+        rpcServer.getLocationsForPath(src, false, false);
     RemoteMethod method = new RemoteMethod("getFileInfo",
         new Class<?>[] {String.class}, new RemoteParam());
 
     HdfsFileStatus ret = null;
     // If it's a directory, we check in all locations
-    if (isPathAll(src)) {
+    if (rpcServer.isPathAll(src)) {
       ret = getFileInfoAll(locations, method);
     } else {
       // Check for file information sequentially
@@ -720,6 +920,9 @@ public class RouterClientProtocol implements ClientProtocol {
           date = dates.get(src);
         }
         ret = getMountPointStatus(src, children.size(), date);
+      } else if (children != null) {
+        // The src is a mount point, but there are no files or directories
+        ret = getMountPointStatus(src, 0, 0);
       }
     }
 
@@ -731,11 +934,11 @@ public class RouterClientProtocol implements ClientProtocol {
     rpcServer.checkOperation(NameNode.OperationCategory.READ);
 
     final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(src, false);
+        rpcServer.getLocationsForPath(src, false, false);
     RemoteMethod method = new RemoteMethod("isFileClosed",
         new Class<?>[] {String.class}, new RemoteParam());
     return rpcClient.invokeSequential(locations, method, Boolean.class,
-        Boolean.TRUE);
+        null);
   }
 
   @Override
@@ -743,7 +946,7 @@ public class RouterClientProtocol implements ClientProtocol {
     rpcServer.checkOperation(NameNode.OperationCategory.READ);
 
     final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(src, false);
+        rpcServer.getLocationsForPath(src, false, false);
     RemoteMethod method = new RemoteMethod("getFileLinkInfo",
         new Class<?>[] {String.class}, new RemoteParam());
     return rpcClient.invokeSequential(locations, method, HdfsFileStatus.class,
@@ -755,7 +958,7 @@ public class RouterClientProtocol implements ClientProtocol {
       boolean needBlockToken) throws IOException {
     rpcServer.checkOperation(NameNode.OperationCategory.READ);
     final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(src, false);
+        rpcServer.getLocationsForPath(src, false, false);
     RemoteMethod method = new RemoteMethod("getLocatedFileInfo",
         new Class<?>[] {String.class, boolean.class}, new RemoteParam(),
         needBlockToken);
@@ -803,10 +1006,13 @@ public class RouterClientProtocol implements ClientProtocol {
       for (DatanodeStorageReport dn : dns) {
         DatanodeInfo dnInfo = dn.getDatanodeInfo();
         String nodeId = dnInfo.getXferAddr();
-        if (!datanodesMap.containsKey(nodeId)) {
+        DatanodeStorageReport oldDn = datanodesMap.get(nodeId);
+        if (oldDn == null ||
+            dnInfo.getLastUpdate() > oldDn.getDatanodeInfo().getLastUpdate()) {
           datanodesMap.put(nodeId, dn);
+        } else {
+          LOG.debug("{} is in multiple subclusters", nodeId);
         }
-        // TODO merge somehow, right now it just takes the first one
       }
     }
 
@@ -866,7 +1072,7 @@ public class RouterClientProtocol implements ClientProtocol {
     rpcServer.checkOperation(NameNode.OperationCategory.UNCHECKED);
 
     RemoteMethod method = new RemoteMethod("saveNamespace",
-        new Class<?>[] {Long.class, Long.class}, timeWindow, txGap);
+        new Class<?>[] {long.class, long.class}, timeWindow, txGap);
     final Set<FederationNamespaceInfo> nss = namenodeResolver.getNamespaces();
     Map<FederationNamespaceInfo, Boolean> ret =
         rpcClient.invokeConcurrent(nss, method, true, false, boolean.class);
@@ -964,7 +1170,7 @@ public class RouterClientProtocol implements ClientProtocol {
     rpcServer.checkOperation(NameNode.OperationCategory.READ);
 
     final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(path, false);
+        rpcServer.getLocationsForPath(path, false, false);
     RemoteMethod method = new RemoteMethod("listCorruptFileBlocks",
         new Class<?>[] {String.class, String.class},
         new RemoteParam(), cookie);
@@ -977,7 +1183,7 @@ public class RouterClientProtocol implements ClientProtocol {
     rpcServer.checkOperation(NameNode.OperationCategory.UNCHECKED);
 
     RemoteMethod method = new RemoteMethod("setBalancerBandwidth",
-        new Class<?>[] {Long.class}, bandwidth);
+        new Class<?>[] {long.class}, bandwidth);
     final Set<FederationNamespaceInfo> nss = namenodeResolver.getNamespaces();
     rpcClient.invokeConcurrent(nss, method, true, false);
   }
@@ -987,19 +1193,26 @@ public class RouterClientProtocol implements ClientProtocol {
     rpcServer.checkOperation(NameNode.OperationCategory.READ);
 
     // Get the summaries from regular files
-    Collection<ContentSummary> summaries = new LinkedList<>();
+    final Collection<ContentSummary> summaries = new ArrayList<>();
+    final List<RemoteLocation> locations =
+        rpcServer.getLocationsForPath(path, false, false);
+    final RemoteMethod method = new RemoteMethod("getContentSummary",
+        new Class<?>[] {String.class}, new RemoteParam());
+    final List<RemoteResult<RemoteLocation, ContentSummary>> results =
+        rpcClient.invokeConcurrent(locations, method,
+            false, -1, ContentSummary.class);
     FileNotFoundException notFoundException = null;
-    try {
-      final List<RemoteLocation> locations =
-          rpcServer.getLocationsForPath(path, false);
-      RemoteMethod method = new RemoteMethod("getContentSummary",
-          new Class<?>[] {String.class}, new RemoteParam());
-      Map<RemoteLocation, ContentSummary> results =
-          rpcClient.invokeConcurrent(
-              locations, method, false, false, ContentSummary.class);
-      summaries.addAll(results.values());
-    } catch (FileNotFoundException e) {
-      notFoundException = e;
+    for (RemoteResult<RemoteLocation, ContentSummary> result : results) {
+      if (result.hasException()) {
+        IOException ioe = result.getException();
+        if (ioe instanceof FileNotFoundException) {
+          notFoundException = (FileNotFoundException)ioe;
+        } else if (!allowPartialList) {
+          throw ioe;
+        }
+      } else if (result.getResult() != null) {
+        summaries.add(result.getResult());
+      }
     }
 
     // Add mount points at this level in the tree
@@ -1008,7 +1221,8 @@ public class RouterClientProtocol implements ClientProtocol {
       for (String child : children) {
         Path childPath = new Path(path, child);
         try {
-          ContentSummary mountSummary = getContentSummary(childPath.toString());
+          ContentSummary mountSummary = getContentSummary(
+              childPath.toString());
           if (mountSummary != null) {
             summaries.add(mountSummary);
           }
@@ -1033,7 +1247,7 @@ public class RouterClientProtocol implements ClientProtocol {
     rpcServer.checkOperation(NameNode.OperationCategory.WRITE);
 
     final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(src, true);
+        rpcServer.getLocationsForPath(src, true, false);
     RemoteMethod method = new RemoteMethod("fsync",
         new Class<?>[] {String.class, long.class, String.class, long.class },
         new RemoteParam(), fileId, clientName, lastBlockLength);
@@ -1045,7 +1259,7 @@ public class RouterClientProtocol implements ClientProtocol {
     rpcServer.checkOperation(NameNode.OperationCategory.WRITE);
 
     final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(src, true);
+        rpcServer.getLocationsForPath(src, false, false);
     RemoteMethod method = new RemoteMethod("setTimes",
         new Class<?>[] {String.class, long.class, long.class},
         new RemoteParam(), mtime, atime);
@@ -1075,95 +1289,98 @@ public class RouterClientProtocol implements ClientProtocol {
     rpcServer.checkOperation(NameNode.OperationCategory.READ);
 
     final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(path, true);
+        rpcServer.getLocationsForPath(path, false, false);
     RemoteMethod method = new RemoteMethod("getLinkTarget",
         new Class<?>[] {String.class}, new RemoteParam());
     return rpcClient.invokeSequential(locations, method, String.class, null);
   }
 
-  @Override // Client Protocol
+  @Override
   public void allowSnapshot(String snapshotRoot) throws IOException {
-    rpcServer.checkOperation(NameNode.OperationCategory.WRITE, false);
+    snapshotProto.allowSnapshot(snapshotRoot);
   }
 
-  @Override // Client Protocol
+  @Override
   public void disallowSnapshot(String snapshot) throws IOException {
-    rpcServer.checkOperation(NameNode.OperationCategory.WRITE, false);
+    snapshotProto.disallowSnapshot(snapshot);
   }
 
   @Override
   public void renameSnapshot(String snapshotRoot, String snapshotOldName,
       String snapshotNewName) throws IOException {
-    rpcServer.checkOperation(NameNode.OperationCategory.WRITE, false);
+    snapshotProto.renameSnapshot(
+        snapshotRoot, snapshotOldName, snapshotNewName);
   }
 
   @Override
   public SnapshottableDirectoryStatus[] getSnapshottableDirListing()
       throws IOException {
-    rpcServer.checkOperation(NameNode.OperationCategory.READ, false);
-    return null;
+    return snapshotProto.getSnapshottableDirListing();
+  }
+
+  @Override
+  public SnapshotStatus[] getSnapshotListing(String snapshotRoot)
+      throws IOException {
+    return snapshotProto.getSnapshotListing(snapshotRoot);
   }
 
   @Override
   public SnapshotDiffReport getSnapshotDiffReport(String snapshotRoot,
       String earlierSnapshotName, String laterSnapshotName) throws IOException {
-    rpcServer.checkOperation(NameNode.OperationCategory.READ, false);
-    return null;
+    return snapshotProto.getSnapshotDiffReport(
+        snapshotRoot, earlierSnapshotName, laterSnapshotName);
   }
 
   @Override
   public SnapshotDiffReportListing getSnapshotDiffReportListing(
       String snapshotRoot, String earlierSnapshotName, String laterSnapshotName,
       byte[] startPath, int index) throws IOException {
-    rpcServer.checkOperation(NameNode.OperationCategory.READ, false);
-    return null;
+    return snapshotProto.getSnapshotDiffReportListing(
+        snapshotRoot, earlierSnapshotName, laterSnapshotName, startPath, index);
   }
 
   @Override
   public long addCacheDirective(CacheDirectiveInfo path,
       EnumSet<CacheFlag> flags) throws IOException {
-    rpcServer.checkOperation(NameNode.OperationCategory.WRITE, false);
-    return 0;
+    return routerCacheAdmin.addCacheDirective(path, flags);
   }
 
   @Override
   public void modifyCacheDirective(CacheDirectiveInfo directive,
       EnumSet<CacheFlag> flags) throws IOException {
-    rpcServer.checkOperation(NameNode.OperationCategory.WRITE, false);
+    routerCacheAdmin.modifyCacheDirective(directive, flags);
   }
 
   @Override
   public void removeCacheDirective(long id) throws IOException {
-    rpcServer.checkOperation(NameNode.OperationCategory.WRITE, false);
+    routerCacheAdmin.removeCacheDirective(id);
   }
 
   @Override
-  public BatchedRemoteIterator.BatchedEntries<CacheDirectiveEntry> listCacheDirectives(
-      long prevId, CacheDirectiveInfo filter) throws IOException {
-    rpcServer.checkOperation(NameNode.OperationCategory.READ, false);
-    return null;
+  public BatchedEntries<CacheDirectiveEntry> listCacheDirectives(long prevId,
+      CacheDirectiveInfo filter) throws IOException {
+    return routerCacheAdmin.listCacheDirectives(prevId, filter);
   }
 
   @Override
   public void addCachePool(CachePoolInfo info) throws IOException {
-    rpcServer.checkOperation(NameNode.OperationCategory.WRITE, false);
+    routerCacheAdmin.addCachePool(info);
   }
 
   @Override
   public void modifyCachePool(CachePoolInfo info) throws IOException {
-    rpcServer.checkOperation(NameNode.OperationCategory.WRITE, false);
+    routerCacheAdmin.modifyCachePool(info);
   }
 
   @Override
   public void removeCachePool(String cachePoolName) throws IOException {
-    rpcServer.checkOperation(NameNode.OperationCategory.WRITE, false);
+    routerCacheAdmin.removeCachePool(cachePoolName);
   }
 
   @Override
-  public BatchedRemoteIterator.BatchedEntries<CachePoolEntry> listCachePools(String prevKey)
+  public BatchedEntries<CachePoolEntry> listCachePools(String prevKey)
       throws IOException {
-    rpcServer.checkOperation(NameNode.OperationCategory.READ, false);
-    return null;
+    return routerCacheAdmin.listCachePools(prevKey);
   }
 
   @Override
@@ -1173,11 +1390,15 @@ public class RouterClientProtocol implements ClientProtocol {
 
     // TODO handle virtual directories
     final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(src, true);
+        rpcServer.getLocationsForPath(src, false, false);
     RemoteMethod method = new RemoteMethod("modifyAclEntries",
         new Class<?>[] {String.class, List.class},
         new RemoteParam(), aclSpec);
-    rpcClient.invokeSequential(locations, method, null, null);
+    if (rpcServer.isInvokeConcurrent(src)) {
+      rpcClient.invokeConcurrent(locations, method);
+    } else {
+      rpcClient.invokeSequential(locations, method);
+    }
   }
 
   @Override
@@ -1187,11 +1408,15 @@ public class RouterClientProtocol implements ClientProtocol {
 
     // TODO handle virtual directories
     final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(src, true);
+        rpcServer.getLocationsForPath(src, false, false);
     RemoteMethod method = new RemoteMethod("removeAclEntries",
         new Class<?>[] {String.class, List.class},
         new RemoteParam(), aclSpec);
-    rpcClient.invokeSequential(locations, method, null, null);
+    if (rpcServer.isInvokeConcurrent(src)) {
+      rpcClient.invokeConcurrent(locations, method);
+    } else {
+      rpcClient.invokeSequential(locations, method);
+    }
   }
 
   @Override
@@ -1200,10 +1425,14 @@ public class RouterClientProtocol implements ClientProtocol {
 
     // TODO handle virtual directories
     final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(src, true);
+        rpcServer.getLocationsForPath(src, false, false);
     RemoteMethod method = new RemoteMethod("removeDefaultAcl",
         new Class<?>[] {String.class}, new RemoteParam());
-    rpcClient.invokeSequential(locations, method);
+    if (rpcServer.isInvokeConcurrent(src)) {
+      rpcClient.invokeConcurrent(locations, method);
+    } else {
+      rpcClient.invokeSequential(locations, method);
+    }
   }
 
   @Override
@@ -1212,10 +1441,14 @@ public class RouterClientProtocol implements ClientProtocol {
 
     // TODO handle virtual directories
     final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(src, true);
+        rpcServer.getLocationsForPath(src, false, false);
     RemoteMethod method = new RemoteMethod("removeAcl",
         new Class<?>[] {String.class}, new RemoteParam());
-    rpcClient.invokeSequential(locations, method);
+    if (rpcServer.isInvokeConcurrent(src)) {
+      rpcClient.invokeConcurrent(locations, method);
+    } else {
+      rpcClient.invokeSequential(locations, method);
+    }
   }
 
   @Override
@@ -1224,11 +1457,15 @@ public class RouterClientProtocol implements ClientProtocol {
 
     // TODO handle virtual directories
     final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(src, true);
+        rpcServer.getLocationsForPath(src, false, false);
     RemoteMethod method = new RemoteMethod(
         "setAcl", new Class<?>[] {String.class, List.class},
         new RemoteParam(), aclSpec);
-    rpcClient.invokeSequential(locations, method);
+    if (rpcServer.isInvokeConcurrent(src)) {
+      rpcClient.invokeConcurrent(locations, method);
+    } else {
+      rpcClient.invokeSequential(locations, method);
+    }
   }
 
   @Override
@@ -1237,7 +1474,7 @@ public class RouterClientProtocol implements ClientProtocol {
 
     // TODO handle virtual directories
     final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(src, false);
+        rpcServer.getLocationsForPath(src, false, false);
     RemoteMethod method = new RemoteMethod("getAclStatus",
         new Class<?>[] {String.class}, new RemoteParam());
     return rpcClient.invokeSequential(locations, method, AclStatus.class, null);
@@ -1250,7 +1487,7 @@ public class RouterClientProtocol implements ClientProtocol {
 
     // TODO handle virtual directories
     final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(src, true);
+        rpcServer.getLocationsForPath(src, false, false);
     RemoteMethod method = new RemoteMethod("createEncryptionZone",
         new Class<?>[] {String.class, String.class},
         new RemoteParam(), keyName);
@@ -1263,7 +1500,7 @@ public class RouterClientProtocol implements ClientProtocol {
 
     // TODO handle virtual directories
     final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(src, false);
+        rpcServer.getLocationsForPath(src, false, false);
     RemoteMethod method = new RemoteMethod("getEZForPath",
         new Class<?>[] {String.class}, new RemoteParam());
     return rpcClient.invokeSequential(
@@ -1271,7 +1508,7 @@ public class RouterClientProtocol implements ClientProtocol {
   }
 
   @Override
-  public BatchedRemoteIterator.BatchedEntries<EncryptionZone> listEncryptionZones(long prevId)
+  public BatchedEntries<EncryptionZone> listEncryptionZones(long prevId)
       throws IOException {
     rpcServer.checkOperation(NameNode.OperationCategory.READ, false);
     return null;
@@ -1284,7 +1521,7 @@ public class RouterClientProtocol implements ClientProtocol {
   }
 
   @Override
-  public BatchedRemoteIterator.BatchedEntries<ZoneReencryptionStatus> listReencryptionStatus(
+  public BatchedEntries<ZoneReencryptionStatus> listReencryptionStatus(
       long prevId) throws IOException {
     rpcServer.checkOperation(NameNode.OperationCategory.READ, false);
     return null;
@@ -1297,11 +1534,15 @@ public class RouterClientProtocol implements ClientProtocol {
 
     // TODO handle virtual directories
     final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(src, true);
+        rpcServer.getLocationsForPath(src, false, false);
     RemoteMethod method = new RemoteMethod("setXAttr",
         new Class<?>[] {String.class, XAttr.class, EnumSet.class},
         new RemoteParam(), xAttr, flag);
-    rpcClient.invokeSequential(locations, method);
+    if (rpcServer.isInvokeConcurrent(src)) {
+      rpcClient.invokeConcurrent(locations, method);
+    } else {
+      rpcClient.invokeSequential(locations, method);
+    }
   }
 
   @SuppressWarnings("unchecked")
@@ -1312,7 +1553,7 @@ public class RouterClientProtocol implements ClientProtocol {
 
     // TODO handle virtual directories
     final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(src, false);
+        rpcServer.getLocationsForPath(src, false, false);
     RemoteMethod method = new RemoteMethod("getXAttrs",
         new Class<?>[] {String.class, List.class}, new RemoteParam(), xAttrs);
     return (List<XAttr>) rpcClient.invokeSequential(
@@ -1326,7 +1567,7 @@ public class RouterClientProtocol implements ClientProtocol {
 
     // TODO handle virtual directories
     final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(src, false);
+        rpcServer.getLocationsForPath(src, false, false);
     RemoteMethod method = new RemoteMethod("listXAttrs",
         new Class<?>[] {String.class}, new RemoteParam());
     return (List<XAttr>) rpcClient.invokeSequential(
@@ -1339,10 +1580,14 @@ public class RouterClientProtocol implements ClientProtocol {
 
     // TODO handle virtual directories
     final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(src, true);
+        rpcServer.getLocationsForPath(src, false, false);
     RemoteMethod method = new RemoteMethod("removeXAttr",
         new Class<?>[] {String.class, XAttr.class}, new RemoteParam(), xAttr);
-    rpcClient.invokeSequential(locations, method);
+    if (rpcServer.isInvokeConcurrent(src)) {
+      rpcClient.invokeConcurrent(locations, method);
+    } else {
+      rpcClient.invokeSequential(locations, method);
+    }
   }
 
   @Override
@@ -1351,7 +1596,7 @@ public class RouterClientProtocol implements ClientProtocol {
 
     // TODO handle virtual directories
     final List<RemoteLocation> locations =
-        rpcServer.getLocationsForPath(path, true);
+        rpcServer.getLocationsForPath(path, false, false);
     RemoteMethod method = new RemoteMethod("checkAccess",
         new Class<?>[] {String.class, FsAction.class},
         new RemoteParam(), mode);
@@ -1393,21 +1638,20 @@ public class RouterClientProtocol implements ClientProtocol {
   @Override
   public String createSnapshot(String snapshotRoot, String snapshotName)
       throws IOException {
-    rpcServer.checkOperation(NameNode.OperationCategory.WRITE);
-    return null;
+    return snapshotProto.createSnapshot(snapshotRoot, snapshotName);
   }
 
   @Override
   public void deleteSnapshot(String snapshotRoot, String snapshotName)
       throws IOException {
-    rpcServer.checkOperation(NameNode.OperationCategory.WRITE, false);
+    snapshotProto.deleteSnapshot(snapshotRoot, snapshotName);
   }
 
   @Override
   public void setQuota(String path, long namespaceQuota, long storagespaceQuota,
       StorageType type) throws IOException {
     rpcServer.getQuotaModule()
-        .setQuota(path, namespaceQuota, storagespaceQuota, type);
+        .setQuota(path, namespaceQuota, storagespaceQuota, type, true);
   }
 
   @Override
@@ -1447,13 +1691,12 @@ public class RouterClientProtocol implements ClientProtocol {
 
   @Override
   public void unsetStoragePolicy(String src) throws IOException {
-    rpcServer.checkOperation(NameNode.OperationCategory.WRITE, false);
+    storagePolicy.unsetStoragePolicy(src);
   }
 
   @Override
   public BlockStoragePolicy getStoragePolicy(String path) throws IOException {
-    rpcServer.checkOperation(NameNode.OperationCategory.READ, false);
-    return null;
+    return storagePolicy.getStoragePolicy(path);
   }
 
   @Override
@@ -1509,27 +1752,41 @@ public class RouterClientProtocol implements ClientProtocol {
   }
 
   @Override
+  public ECTopologyVerifierResult getECTopologyResultForPolicies(
+      String... policyNames) throws IOException {
+    rpcServer.checkOperation(NameNode.OperationCategory.UNCHECKED, true);
+    return erasureCoding.getECTopologyResultForPolicies(policyNames);
+  }
+
+  @Override
   public ECBlockGroupStats getECBlockGroupStats() throws IOException {
     return erasureCoding.getECBlockGroupStats();
   }
 
   @Override
   public ReplicatedBlockStats getReplicatedBlockStats() throws IOException {
-    rpcServer.checkOperation(NameNode.OperationCategory.READ, false);
-    return null;
+    rpcServer.checkOperation(NameNode.OperationCategory.READ);
+
+    RemoteMethod method = new RemoteMethod("getReplicatedBlockStats");
+    Set<FederationNamespaceInfo> nss = namenodeResolver.getNamespaces();
+    Map<FederationNamespaceInfo, ReplicatedBlockStats> ret = rpcClient
+        .invokeConcurrent(nss, method, true, false, ReplicatedBlockStats.class);
+    return ReplicatedBlockStats.merge(ret.values());
   }
 
   @Deprecated
   @Override
-  public BatchedRemoteIterator.BatchedEntries<OpenFileEntry> listOpenFiles(long prevId)
+  public BatchedEntries<OpenFileEntry> listOpenFiles(long prevId)
       throws IOException {
-    return listOpenFiles(prevId, EnumSet.of(OpenFilesIterator.OpenFilesType.ALL_OPEN_FILES),
+    return listOpenFiles(prevId,
+        EnumSet.of(OpenFilesIterator.OpenFilesType.ALL_OPEN_FILES),
         OpenFilesIterator.FILTER_PATH_DEFAULT);
   }
 
   @Override
-  public BatchedRemoteIterator.BatchedEntries<OpenFileEntry> listOpenFiles(long prevId,
-      EnumSet<OpenFilesIterator.OpenFilesType> openFilesTypes, String path) throws IOException {
+  public BatchedEntries<OpenFileEntry> listOpenFiles(long prevId,
+      EnumSet<OpenFilesIterator.OpenFilesType> openFilesTypes, String path)
+          throws IOException {
     rpcServer.checkOperation(NameNode.OperationCategory.READ, false);
     return null;
   }
@@ -1541,14 +1798,15 @@ public class RouterClientProtocol implements ClientProtocol {
 
   @Override
   public void satisfyStoragePolicy(String path) throws IOException {
-    rpcServer.checkOperation(NameNode.OperationCategory.WRITE, false);
+    storagePolicy.satisfyStoragePolicy(path);
   }
 
   @Override
-  public HAServiceProtocol.HAServiceState getHAServiceState()
-      throws IOException {
-    rpcServer.checkOperation(NameNode.OperationCategory.READ, false);
-    return null;
+  public HAServiceProtocol.HAServiceState getHAServiceState() {
+    if (rpcServer.isSafeMode()) {
+      return HAServiceProtocol.HAServiceState.STANDBY;
+    }
+    return HAServiceProtocol.HAServiceState.ACTIVE;
   }
 
   /**
@@ -1566,11 +1824,9 @@ public class RouterClientProtocol implements ClientProtocol {
    * @throws IOException If the dst paths could not be determined.
    */
   private RemoteParam getRenameDestinations(
-      final List<RemoteLocation> srcLocations, final String dst)
-      throws IOException {
+      final List<RemoteLocation> srcLocations,
+      final List<RemoteLocation> dstLocations) throws IOException {
 
-    final List<RemoteLocation> dstLocations =
-        rpcServer.getLocationsForPath(dst, true);
     final Map<RemoteLocation, String> dstMap = new HashMap<>();
 
     Iterator<RemoteLocation> iterator = srcLocations.iterator();
@@ -1609,6 +1865,8 @@ public class RouterClientProtocol implements ClientProtocol {
 
   /**
    * Aggregate content summaries for each subcluster.
+   * If the mount point has multiple destinations
+   * add the quota set value only once.
    *
    * @param summaries Collection of individual summaries.
    * @return Aggregated content summary.
@@ -1625,14 +1883,20 @@ public class RouterClientProtocol implements ClientProtocol {
     long quota = 0;
     long spaceConsumed = 0;
     long spaceQuota = 0;
+    String ecPolicy = "";
 
     for (ContentSummary summary : summaries) {
       length += summary.getLength();
       fileCount += summary.getFileCount();
       directoryCount += summary.getDirectoryCount();
-      quota += summary.getQuota();
+      quota = summary.getQuota();
       spaceConsumed += summary.getSpaceConsumed();
-      spaceQuota += summary.getSpaceQuota();
+      spaceQuota = summary.getSpaceQuota();
+      // We return from the first response as we assume that the EC policy
+      // of each sub-cluster is same.
+      if (ecPolicy.isEmpty()) {
+        ecPolicy = summary.getErasureCodingPolicy();
+      }
     }
 
     ContentSummary ret = new ContentSummary.Builder()
@@ -1642,6 +1906,7 @@ public class RouterClientProtocol implements ClientProtocol {
         .quota(quota)
         .spaceConsumed(spaceConsumed)
         .spaceQuota(spaceQuota)
+        .erasureCodingPolicy(ecPolicy)
         .build();
     return ret;
   }
@@ -1657,16 +1922,33 @@ public class RouterClientProtocol implements ClientProtocol {
    */
   private HdfsFileStatus getFileInfoAll(final List<RemoteLocation> locations,
       final RemoteMethod method) throws IOException {
+    return getFileInfoAll(locations, method, -1);
+  }
+
+  /**
+   * Get the file info from all the locations.
+   *
+   * @param locations Locations to check.
+   * @param method The file information method to run.
+   * @param timeOutMs Time out for the operation in milliseconds.
+   * @return The first file info if it's a file, the directory if it's
+   *         everywhere.
+   * @throws IOException If all the locations throw an exception.
+   */
+  private HdfsFileStatus getFileInfoAll(final List<RemoteLocation> locations,
+      final RemoteMethod method, long timeOutMs) throws IOException {
 
     // Get the file info from everybody
     Map<RemoteLocation, HdfsFileStatus> results =
-        rpcClient.invokeConcurrent(locations, method, HdfsFileStatus.class);
-
+        rpcClient.invokeConcurrent(locations, method, false, false, timeOutMs,
+            HdfsFileStatus.class);
+    int children = 0;
     // We return the first file
     HdfsFileStatus dirStatus = null;
     for (RemoteLocation loc : locations) {
       HdfsFileStatus fileStatus = results.get(loc);
       if (fileStatus != null) {
+        children += fileStatus.getChildrenNum();
         if (!fileStatus.isDirectory()) {
           return fileStatus;
         } else if (dirStatus == null) {
@@ -1674,7 +1956,10 @@ public class RouterClientProtocol implements ClientProtocol {
         }
       }
     }
-    return dirStatus;
+    if (dirStatus != null) {
+      return updateMountPointStatus(dirStatus, children);
+    }
+    return null;
   }
 
   /**
@@ -1693,27 +1978,6 @@ public class RouterClientProtocol implements ClientProtocol {
   }
 
   /**
-   * Check if a path should be in all subclusters.
-   *
-   * @param path Path to check.
-   * @return If a path should be in all subclusters.
-   */
-  private boolean isPathAll(final String path) {
-    if (subclusterResolver instanceof MountTableResolver) {
-      try {
-        MountTableResolver mountTable = (MountTableResolver)subclusterResolver;
-        MountTable entry = mountTable.getMountPoint(path);
-        if (entry != null) {
-          return entry.isAll();
-        }
-      } catch (IOException e) {
-        LOG.error("Cannot get mount point", e);
-      }
-    }
-    return false;
-  }
-
-  /**
    * Create a new file status for a mount point.
    *
    * @param name Name of the mount point.
@@ -1721,22 +1985,60 @@ public class RouterClientProtocol implements ClientProtocol {
    * @param date Map with the dates.
    * @return New HDFS file status representing a mount point.
    */
-  private HdfsFileStatus getMountPointStatus(
+  @VisibleForTesting
+  HdfsFileStatus getMountPointStatus(
       String name, int childrenNum, long date) {
     long modTime = date;
     long accessTime = date;
     FsPermission permission = FsPermission.getDirDefault();
     String owner = this.superUser;
     String group = this.superGroup;
-    try {
-      // TODO support users, it should be the user for the pointed folder
-      UserGroupInformation ugi = RouterRpcServer.getRemoteUser();
-      owner = ugi.getUserName();
-      group = ugi.getPrimaryGroupName();
-    } catch (IOException e) {
-      LOG.error("Cannot get the remote user: {}", e.getMessage());
+    EnumSet<HdfsFileStatus.Flags> flags =
+        EnumSet.noneOf(HdfsFileStatus.Flags.class);
+    if (subclusterResolver instanceof MountTableResolver) {
+      try {
+        String mName = name.startsWith("/") ? name : "/" + name;
+        MountTableResolver mountTable = (MountTableResolver) subclusterResolver;
+        MountTable entry = mountTable.getMountPoint(mName);
+        if (entry != null) {
+          permission = entry.getMode();
+          owner = entry.getOwnerName();
+          group = entry.getGroupName();
+
+          RemoteMethod method = new RemoteMethod("getFileInfo",
+              new Class<?>[] {String.class}, new RemoteParam());
+          HdfsFileStatus fInfo = getFileInfoAll(
+              entry.getDestinations(), method, mountStatusTimeOut);
+          if (fInfo != null) {
+            permission = fInfo.getPermission();
+            owner = fInfo.getOwner();
+            group = fInfo.getGroup();
+            childrenNum = fInfo.getChildrenNum();
+            flags = DFSUtil
+                .getFlags(fInfo.isEncrypted(), fInfo.isErasureCoded(),
+                    fInfo.isSnapshotEnabled(), fInfo.hasAcl());
+          }
+        }
+      } catch (IOException e) {
+        LOG.error("Cannot get mount point: {}", e.getMessage());
+      }
+    } else {
+      try {
+        UserGroupInformation ugi = RouterRpcServer.getRemoteUser();
+        owner = ugi.getUserName();
+        group = ugi.getPrimaryGroupName();
+      } catch (IOException e) {
+        String msg = "Cannot get remote user: " + e.getMessage();
+        if (UserGroupInformation.isSecurityEnabled()) {
+          LOG.error(msg);
+        } else {
+          LOG.debug(msg);
+        }
+      }
     }
     long inodeId = 0;
+    Path path = new Path(name);
+    String nameStr = path.getName();
     return new HdfsFileStatus.Builder()
         .isdir(true)
         .mtime(modTime)
@@ -1745,9 +2047,10 @@ public class RouterClientProtocol implements ClientProtocol {
         .owner(owner)
         .group(group)
         .symlink(new byte[0])
-        .path(DFSUtil.string2Bytes(name))
+        .path(DFSUtil.string2Bytes(nameStr))
         .fileId(inodeId)
         .children(childrenNum)
+        .flags(flags)
         .build();
   }
 
@@ -1815,5 +2118,94 @@ public class RouterClientProtocol implements ClientProtocol {
       LOG.error("Cannot get mount point", e);
     }
     return modTime;
+  }
+
+  /**
+   * Get listing on remote locations.
+   */
+  private List<RemoteResult<RemoteLocation, DirectoryListing>> getListingInt(
+      String src, byte[] startAfter, boolean needLocation) throws IOException {
+    try {
+      List<RemoteLocation> locations =
+          rpcServer.getLocationsForPath(src, false, false);
+      // Locate the dir and fetch the listing.
+      if (locations.isEmpty()) {
+        return new ArrayList<>();
+      }
+      RemoteMethod method = new RemoteMethod("getListing",
+          new Class<?>[] {String.class, startAfter.getClass(), boolean.class},
+          new RemoteParam(), startAfter, needLocation);
+      List<RemoteResult<RemoteLocation, DirectoryListing>> listings = rpcClient
+          .invokeConcurrent(locations, method, false, -1,
+              DirectoryListing.class);
+      return listings;
+    } catch (RouterResolveException e) {
+      LOG.debug("Cannot get locations for {}, {}.", src, e.getMessage());
+      return new ArrayList<>();
+    }
+  }
+
+  /**
+   * Check if we should add the mount point into the total listing.
+   * This should be done under either of the two cases:
+   * 1) current mount point is between startAfter and cutoff lastEntry.
+   * 2) there are no remaining entries from subclusters and this mount
+   *    point is bigger than all files from subclusters
+   * This is to make sure that the following batch of
+   * getListing call will use the correct startAfter, which is lastEntry from
+   * subcluster.
+   *
+   * @param mountPoint to be added mount point inside router
+   * @param lastEntry biggest listing from subcluster
+   * @param startAfter starting listing from client, used to define listing
+   *                   start boundary
+   * @param remainingEntries how many entries left from subcluster
+   * @return
+   */
+  private static boolean shouldAddMountPoint(
+      String mountPoint, String lastEntry, byte[] startAfter,
+      int remainingEntries) {
+    if (mountPoint.compareTo(DFSUtil.bytes2String(startAfter)) > 0 &&
+        mountPoint.compareTo(lastEntry) <= 0) {
+      return true;
+    }
+    if (remainingEntries == 0 && mountPoint.compareTo(lastEntry) >= 0) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Checks if the path is a directory and is supposed to be present in all
+   * subclusters.
+   * @param src the source path
+   * @return true if the path is directory and is supposed to be present in all
+   *         subclusters else false in all other scenarios.
+   * @throws IOException if unable to get the file status.
+   */
+  @VisibleForTesting
+  boolean isMultiDestDirectory(String src) throws IOException {
+    try {
+      if (rpcServer.isPathAll(src)) {
+        List<RemoteLocation> locations;
+        locations = rpcServer.getLocationsForPath(src, false, false);
+        RemoteMethod method = new RemoteMethod("getFileInfo",
+            new Class<?>[] {String.class}, new RemoteParam());
+        HdfsFileStatus fileStatus = rpcClient.invokeSequential(locations,
+            method, HdfsFileStatus.class, null);
+        if (fileStatus != null) {
+          return fileStatus.isDirectory();
+        } else {
+          LOG.debug("The destination {} doesn't exist.", src);
+        }
+      }
+    } catch (UnresolvedPathException e) {
+      LOG.debug("The destination {} is a symlink.", src);
+    }
+    return false;
+  }
+
+  public int getRouterFederationRenameCount() {
+    return rbfRename.getRouterFederationRenameCount();
   }
 }

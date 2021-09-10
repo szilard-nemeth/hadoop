@@ -24,16 +24,29 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.channels.ClosedChannelException;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.EnumSet;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 
-import com.google.common.base.Preconditions;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.impl.AbstractFSBuilderImpl;
+import org.apache.hadoop.fs.impl.FutureDataInputStreamBuilderImpl;
+import org.apache.hadoop.fs.impl.OpenFileParameters;
 import org.apache.hadoop.fs.permission.AclEntry;
 import org.apache.hadoop.fs.permission.FsPermission;
+import org.apache.hadoop.fs.statistics.IOStatistics;
+import org.apache.hadoop.fs.statistics.IOStatisticsSource;
+import org.apache.hadoop.fs.statistics.IOStatisticsSupport;
 import org.apache.hadoop.util.DataChecksum;
+import org.apache.hadoop.util.LambdaUtils;
 import org.apache.hadoop.util.Progressable;
+
+import static org.apache.hadoop.fs.impl.PathCapabilitiesSupport.validatePathCapabilityArgs;
+import static org.apache.hadoop.fs.impl.StoreImplementationUtils.isProbeForSyncable;
 
 /****************************************************************
  * Abstract Checksumed FileSystem.
@@ -125,7 +138,8 @@ public abstract class ChecksumFileSystem extends FilterFileSystem {
    * For open()'s FSInputStream
    * It verifies that data matches checksums.
    *******************************************************/
-  private static class ChecksumFSInputChecker extends FSInputChecker {
+  private static class ChecksumFSInputChecker extends FSInputChecker implements
+      IOStatisticsSource {
     private ChecksumFileSystem fs;
     private FSDataInputStream datas;
     private FSDataInputStream sums;
@@ -261,6 +275,17 @@ public abstract class ChecksumFileSystem extends FilterFileSystem {
       }
       return nread;
     }
+
+    /**
+     * Get the IO Statistics of the nested stream, falling back to
+     * null if the stream does not implement the interface
+     * {@link IOStatisticsSource}.
+     * @return an IOStatistics instance or null
+     */
+    @Override
+    public IOStatistics getIOStatistics() {
+      return IOStatisticsSupport.retrieveIOStatistics(datas);
+    }
   }
   
   private static class FSDataBoundedInputStream extends FSDataInputStream {
@@ -365,6 +390,12 @@ public abstract class ChecksumFileSystem extends FilterFileSystem {
         + "by ChecksumFileSystem");
   }
 
+  @Override
+  public void concat(final Path f, final Path[] psrcs) throws IOException {
+    throw new UnsupportedOperationException("Concat is not supported "
+        + "by ChecksumFileSystem");
+  }
+
   /**
    * Calculated the length of the checksum file in bytes.
    * @param size the length of the data file in bytes
@@ -380,7 +411,8 @@ public abstract class ChecksumFileSystem extends FilterFileSystem {
 
   /** This class provides an output stream for a checksummed file.
    * It generates checksums for data. */
-  private static class ChecksumFSOutputSummer extends FSOutputSummer {
+  private static class ChecksumFSOutputSummer extends FSOutputSummer
+      implements IOStatisticsSource, StreamCapabilities {
     private FSDataOutputStream datas;    
     private FSDataOutputStream sums;
     private static final float CHKSUM_AS_FRACTION = 0.01f;
@@ -434,6 +466,31 @@ public abstract class ChecksumFileSystem extends FilterFileSystem {
         throw new ClosedChannelException();
       }
     }
+
+    /**
+     * Get the IO Statistics of the nested stream, falling back to
+     * null if the stream does not implement the interface
+     * {@link IOStatisticsSource}.
+     * @return an IOStatistics instance or null
+     */
+    @Override
+    public IOStatistics getIOStatistics() {
+      return IOStatisticsSupport.retrieveIOStatistics(datas);
+    }
+
+    /**
+     * Probe the inner stream for a capability.
+     * Syncable operations are rejected before being passed down.
+     * @param capability string to query the stream support for.
+     * @return true if a capability is known to be supported.
+     */
+    @Override
+    public boolean hasCapability(final String capability) {
+      if (isProbeForSyncable(capability)) {
+        return false;
+      }
+      return datas.hasCapability(capability);
+    }
   }
 
   @Override
@@ -481,6 +538,32 @@ public abstract class ChecksumFileSystem extends FilterFileSystem {
       boolean overwrite, int bufferSize, short replication, long blockSize,
       Progressable progress) throws IOException {
     return create(f, permission, overwrite, false, bufferSize, replication,
+        blockSize, progress);
+  }
+
+  @Override
+  public FSDataOutputStream create(final Path f,
+      final FsPermission permission,
+      final EnumSet<CreateFlag> flags,
+      final int bufferSize,
+      final short replication,
+      final long blockSize,
+      final Progressable progress,
+      final Options.ChecksumOpt checksumOpt) throws IOException {
+    return create(f, permission, flags.contains(CreateFlag.OVERWRITE),
+        bufferSize, replication, blockSize, progress);
+  }
+
+  @Override
+  public FSDataOutputStream createNonRecursive(final Path f,
+      final FsPermission permission,
+      final EnumSet<CreateFlag> flags,
+      final int bufferSize,
+      final short replication,
+      final long blockSize,
+      final Progressable progress) throws IOException {
+    return create(f, permission, flags.contains(CreateFlag.OVERWRITE),
+        false, bufferSize, replication,
         blockSize, progress);
   }
 
@@ -780,4 +863,76 @@ public abstract class ChecksumFileSystem extends FilterFileSystem {
                                        long inPos, FSDataInputStream sums, long sumsPos) {
     return false;
   }
+
+  /**
+   * This is overridden to ensure that this class's
+   * {@link #openFileWithOptions}() method is called, and so ultimately
+   * its {@link #open(Path, int)}.
+   *
+   * {@inheritDoc}
+   */
+  @Override
+  public FutureDataInputStreamBuilder openFile(final Path path)
+      throws IOException, UnsupportedOperationException {
+    return ((FutureDataInputStreamBuilderImpl)
+        createDataInputStreamBuilder(this, path)).getThisBuilder();
+  }
+
+  /**
+   * Open the file as a blocking call to {@link #open(Path, int)}.
+   *
+   * {@inheritDoc}
+   */
+  @Override
+  protected CompletableFuture<FSDataInputStream> openFileWithOptions(
+      final Path path,
+      final OpenFileParameters parameters) throws IOException {
+    AbstractFSBuilderImpl.rejectUnknownMandatoryKeys(
+        parameters.getMandatoryKeys(),
+        Collections.emptySet(),
+        "for " + path);
+    return LambdaUtils.eval(
+        new CompletableFuture<>(),
+        () -> open(path, parameters.getBufferSize()));
+  }
+
+  /**
+   * This is overridden to ensure that this class's create() method is
+   * ultimately called.
+   *
+   * {@inheritDoc}
+   */
+  public FSDataOutputStreamBuilder createFile(Path path) {
+    return createDataOutputStreamBuilder(this, path)
+        .create().overwrite(true);
+  }
+
+  /**
+   * This is overridden to ensure that this class's create() method is
+   * ultimately called.
+   *
+   * {@inheritDoc}
+   */
+  public FSDataOutputStreamBuilder appendFile(Path path) {
+    return createDataOutputStreamBuilder(this, path).append();
+  }
+
+  /**
+   * Disable those operations which the checksummed FS blocks.
+   * {@inheritDoc}
+   */
+  @Override
+  public boolean hasPathCapability(final Path path, final String capability)
+      throws IOException {
+    // query the superclass, which triggers argument validation.
+    final Path p = makeQualified(path);
+    switch (validatePathCapabilityArgs(p, capability)) {
+    case CommonPathCapabilities.FS_APPEND:
+    case CommonPathCapabilities.FS_CONCAT:
+      return false;
+    default:
+      return super.hasPathCapability(p, capability);
+    }
+  }
+
 }

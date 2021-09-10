@@ -17,10 +17,12 @@
  */
 package org.apache.hadoop.hdfs.server.datanode;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
-import com.google.protobuf.ByteString;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
+import org.apache.hadoop.thirdparty.protobuf.ByteString;
+import javax.crypto.SecretKey;
 import org.apache.commons.logging.Log;
+import org.apache.hadoop.fs.FsTracer;
 import org.apache.hadoop.fs.StorageType;
 import org.apache.hadoop.hdfs.DFSUtilClient;
 import org.apache.hadoop.hdfs.ExtendedBlockId;
@@ -47,6 +49,7 @@ import org.apache.hadoop.hdfs.protocol.proto.DataTransferProtos.ReleaseShortCirc
 import org.apache.hadoop.hdfs.protocol.proto.DataTransferProtos.ShortCircuitShmResponseProto;
 import org.apache.hadoop.hdfs.protocol.proto.DataTransferProtos.Status;
 import org.apache.hadoop.hdfs.protocolPB.PBHelperClient;
+import org.apache.hadoop.hdfs.security.token.block.BlockKey;
 import org.apache.hadoop.hdfs.security.token.block.BlockTokenIdentifier;
 import org.apache.hadoop.hdfs.server.datanode.BlockChecksumHelper.BlockChecksumComputer;
 import org.apache.hadoop.hdfs.server.datanode.BlockChecksumHelper.AbstractBlockChecksumComputer;
@@ -133,7 +136,7 @@ class DataXceiver extends Receiver implements Runnable {
   
   private DataXceiver(Peer peer, DataNode datanode,
       DataXceiverServer dataXceiverServer) throws IOException {
-    super(datanode.getTracer());
+    super(FsTracer.get(null));
     this.peer = peer;
     this.dnConf = datanode.getDnConf();
     this.socketIn = peer.getInputStream();
@@ -429,7 +432,7 @@ class DataXceiver extends Receiver implements Runnable {
             blk.getBlockId(), dnR.getDatanodeUuid(), success));
       }
       if (fis != null) {
-        IOUtils.cleanup(null, fis);
+        IOUtils.cleanupWithLogger(null, fis);
       }
     }
   }
@@ -552,7 +555,7 @@ class DataXceiver extends Receiver implements Runnable {
           LOG.warn("Failed to shut down socket in error handler", e);
         }
       }
-      IOUtils.cleanup(null, shmInfo);
+      IOUtils.cleanupWithLogger(null, shmInfo);
     }
   }
 
@@ -584,7 +587,7 @@ class DataXceiver extends Receiver implements Runnable {
     final String clientTraceFmt =
       clientName.length() > 0 && ClientTraceLog.isInfoEnabled()
         ? String.format(DN_CLIENTTRACE_FORMAT, localAddress, remoteAddress,
-            "%d", "HDFS_READ", clientName, "%d",
+            "", "%d", "HDFS_READ", clientName, "%d",
             dnR.getDatanodeUuid(), block, "%d")
         : dnR + " Served block " + block + " to " +
             remoteAddress;
@@ -645,6 +648,12 @@ class DataXceiver extends Receiver implements Runnable {
             dnR, block, remoteAddress, ioe);
         incrDatanodeNetworkErrors();
       }
+      // Normally the client reports a bad block to the NN. However if the
+      // meta file is corrupt or an disk error occurs (EIO), then the client
+      // never gets a chance to do validation, and hence will never report
+      // the block as bad. For some classes of IO exception, the DN should
+      // report the block as bad, via the handleBadBlock() method
+      datanode.handleBadBlock(block, ioe, false);
       throw ioe;
     } finally {
       IOUtils.closeStream(blockSender);
@@ -798,8 +807,16 @@ class DataXceiver extends Receiver implements Runnable {
           InputStream unbufMirrorIn = NetUtils.getInputStream(mirrorSock);
           DataEncryptionKeyFactory keyFactory =
             datanode.getDataEncryptionKeyFactoryForBlock(block);
-          IOStreamPair saslStreams = datanode.saslClient.socketSend(mirrorSock,
-            unbufMirrorOut, unbufMirrorIn, keyFactory, blockToken, targets[0]);
+          SecretKey secretKey = null;
+          if (dnConf.overwriteDownstreamDerivedQOP) {
+            String bpid = block.getBlockPoolId();
+            BlockKey blockKey = datanode.blockPoolTokenSecretManager
+                .get(bpid).getCurrentKey();
+            secretKey = blockKey.getKey();
+          }
+          IOStreamPair saslStreams = datanode.saslClient.socketSend(
+              mirrorSock, unbufMirrorOut, unbufMirrorIn, keyFactory,
+              blockToken, targets[0], secretKey);
           unbufMirrorOut = saslStreams.out;
           unbufMirrorIn = saslStreams.in;
           mirrorOut = new DataOutputStream(new BufferedOutputStream(unbufMirrorOut,
@@ -861,11 +878,11 @@ class DataXceiver extends Receiver implements Runnable {
           IOUtils.closeSocket(mirrorSock);
           mirrorSock = null;
           if (isClient) {
-            LOG.error("{}:Exception transfering block {} to mirror {}",
+            LOG.error("{}:Exception transferring block {} to mirror {}",
                 datanode, block, mirrorNode, e);
             throw e;
           } else {
-            LOG.info("{}:Exception transfering {} to mirror {}- continuing " +
+            LOG.info("{}:Exception transferring {} to mirror {}- continuing " +
                 "without the mirror", datanode, block, mirrorNode, e);
             incrDatanodeNetworkErrors();
           }
@@ -889,8 +906,8 @@ class DataXceiver extends Receiver implements Runnable {
       // receive the block and mirror to the next target
       if (blockReceiver != null) {
         String mirrorAddr = (mirrorSock == null) ? null : mirrorNode;
-        blockReceiver.receiveBlock(mirrorOut, mirrorIn, replyOut,
-            mirrorAddr, null, targets, false);
+        blockReceiver.receiveBlock(mirrorOut, mirrorIn, replyOut, mirrorAddr,
+            dataXceiverServer.getWriteThrottler(), targets, false);
 
         // send close-ack for transfer-RBW/Finalized 
         if (isTransfer) {
@@ -912,8 +929,9 @@ class DataXceiver extends Receiver implements Runnable {
       if (isDatanode ||
           stage == BlockConstructionStage.PIPELINE_CLOSE_RECOVERY) {
         datanode.closeBlock(block, null, storageUuid, isOnTransientStorage);
-        LOG.info("Received {} src: {} dest: {} of size {}",
-            block, remoteAddress, localAddress, block.getNumBytes());
+        LOG.info("Received {} src: {} dest: {} volume: {} of size {}",
+            block, remoteAddress, localAddress, replica.getVolume(),
+            block.getNumBytes());
       }
 
       if(isClient) {
@@ -1108,6 +1126,12 @@ class DataXceiver extends Receiver implements Runnable {
       isOpSuccess = false;
       LOG.info("opCopyBlock {} received exception {}", block, ioe.toString());
       incrDatanodeNetworkErrors();
+      // Normally the client reports a bad block to the NN. However if the
+      // meta file is corrupt or an disk error occurs (EIO), then the client
+      // never gets a chance to do validation, and hence will never report
+      // the block as bad. For some classes of IO exception, the DN should
+      // report the block as bad, via the handleBadBlock() method
+      datanode.handleBadBlock(block, ioe, false);
       throw ioe;
     } finally {
       dataXceiverServer.balanceThrottler.release();
@@ -1227,6 +1251,8 @@ class DataXceiver extends Receiver implements Runnable {
         
         LOG.info("Moved {} from {}, delHint={}",
             block, peer.getRemoteAddressString(), delHint);
+
+        datanode.metrics.incrReplaceBlockOpToOtherHost();
       }
     } catch (IOException ioe) {
       opStatus = ERROR;

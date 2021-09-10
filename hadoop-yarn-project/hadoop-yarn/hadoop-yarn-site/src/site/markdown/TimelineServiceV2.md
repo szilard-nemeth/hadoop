@@ -73,8 +73,6 @@ The following diagram illustrates the design at a high level.
 
 ### <a name="Current_Status"></a>Current Status and Future Plans
 
-YARN Timeline Service v.2 is currently in alpha ("alpha 2"). It is a work in progress, and
-many things can and will change rapidly.
 
 A complete end-to-end flow of writes and reads is functional, with Apache HBase as the backend.
 You should be able to start generating data. When enabled, all YARN-generic events are
@@ -82,32 +80,31 @@ published as well as YARN system metrics such as CPU and memory. Furthermore, so
 including Distributed Shell and MapReduce can write per-framework data to YARN Timeline Service
 v.2.
 
-The basic mode of accessing data is via REST. Currently there is no support for command line
-access. The REST API comes with a good number of useful and flexible query patterns (see below for
-more information).
+The basic mode of accessing data is via REST. The REST API comes with a good number of useful and flexible query patterns (see below for
+more information). YARN Client has been integrated with ATSv2. This enables fetching application/attempt/container
+report from TimelineReader if details are not present in ResouceManager.
 
 The collectors (writers) are currently embedded in the node managers as auxiliary services. The
 resource manager also has its dedicated in-process collector. The reader is currently a single
 instance. Currently, it is not possible to write to Timeline Service outside the context of a YARN
 application (i.e. no off-cluster client).
 
-Starting from alpha2, Timeline Service v.2 supports simple authorization in terms of a
-configurable whitelist of users and groups who can read timeline data. Cluster admins are
+Kerberos Authentication is supported end to end. All communication to HBase can be kerberized. Refer [Security Configuration](#Security_Configuration) for configs.
+Support for simple authorization has been added in terms of a configurable whitelist of users and groups who can read timeline data. Cluster admins are
 allowed by default to read timeline data.
+
 
 When YARN Timeline Service v.2 is disabled, one can expect no functional or performance impact
 on any other existing functionality.
 
-The work to make it truly production-ready continues. Some key items include
 
-* More robust storage fault tolerance
+Road map includes
+
+* More robust storage fault tolerance.
 * Support for off-cluster clients
-* Better support for long-running apps
-* Support for ACLs
+* Support for entity ACLs
 * Offline (time-based periodic) aggregation for flows, users, and queues for reporting and
 analysis
-* Timeline collectors as separate instances from node managers
-* Clustering of the readers
 * Migration and compatibility with v.1
 
 
@@ -143,7 +140,7 @@ New configuration parameters that are introduced with v.2 are marked bold.
 | **`yarn.timeline-service.hbase.coprocessor.app-final-value-retention-milliseconds`** | The setting that controls how long the final value of a metric of a completed app is retained before merging into the flow sum. Defaults to `259200000` (3 days). This should be set in the HBase cluster. |
 | **`yarn.rm.system-metrics-publisher.emit-container-events`** | The setting that controls whether yarn container metrics is published to the timeline server or not by RM. This configuration setting is for ATS V2. Defaults to `false`. |
 | **`yarn.nodemanager.emit-container-events`** | The setting that controls whether yarn container metrics is published to the timeline server or not by NM. This configuration setting is for ATS V2. Defaults to `true`. |
-#### Security Configuration
+#### <a name="Security_Configuration"></a>Security Configuration
 
 
 Security can be enabled by setting `yarn.timeline-service.http-authentication.type`
@@ -163,6 +160,7 @@ to `kerberos`, after which the following configuration options are available:
 | `yarn.timeline-service.delegation.token.max-lifetime` | Defaults to `604800000` (7 days). |
 | `yarn.timeline-service.read.authentication.enabled` | Enables or disables authorization checks for reading timeline service v2 data. Default is `false` which is disabled. |
 | `yarn.timeline-service.read.allowed.users` | Comma separated list of user, followed by space, then comma separated list of groups. It will allow this list of users and groups to read the data and reject everyone else. Default value is set to none. If authorization is enabled, then this configuration is mandatory.  |
+| `yarn.webapp.filter-entity-list-by-user` | Default is false. If set true and yarn.timeline-service.read.authentication.enabled is disabled, then listing of entities restricted to remote user entities only. It is YARN common configuration for listing APIs. Using this configuration TimelineReader authorize caller UGI with entity owner. If does not match, those entities will be removed from response.|
 
 #### Enabling CORS support
 To enable cross-origin support (CORS) for the Timeline Service v.2, please set the following configuration parameters:
@@ -252,18 +250,53 @@ For example,
 ```
 
 ##### <a name="Create_schema"> </a>Step 3) Create the timeline service schema
+The schema creation can be run on the hbase cluster which is going to store the timeline
+service tables. The schema creator tool requires both the timelineservice-hbase as well
+as the hbase-server jars. Hence, during schema creation, you need to ensure that the
+hbase classpath contains the yarn-timelineservice-hbase jar.
+
+On the hbase cluster, you can get it from hdfs since we placed it there for the
+coprocessor in the step above.
+
+```
+   hadoop fs -get /hbase/coprocessor/hadoop-yarn-server-timelineservice-hbase-client-${project.version}.jar <local-dir>/.
+   hadoop fs -get /hbase/coprocessor/hadoop-yarn-server-timelineservice-${project.version}.jar <local-dir>/.
+   hadoop fs -get /hbase/coprocessor/hadoop-yarn-server-timelineservice-hbase-common-${project.version}.jar <local-dir>/.
+```
+
+Next, add it to the hbase classpath as follows:
+
+```
+   export HBASE_CLASSPATH=$HBASE_CLASSPATH:/home/yarn/hadoop-current/share/hadoop/yarn/timelineservice/hadoop-yarn-server-timelineservice-hbase-client-${project.version}.jar
+   export HBASE_CLASSPATH=$HBASE_CLASSPATH:/home/yarn/hadoop-current/share/hadoop/yarn/timelineservice/hadoop-yarn-server-timelineservice-${project.version}.jar
+   export HBASE_CLASSPATH=$HBASE_CLASSPATH:/home/yarn/hadoop-current/share/hadoop/yarn/timelineservice/hadoop-yarn-server-timelineservice-hbase-common-${project.version}.jar
+```
+
 Finally, run the schema creator tool to create the necessary tables:
 
-    bin/hadoop org.apache.hadoop.yarn.server.timelineservice.storage.TimelineSchemaCreator -create
+```
+    bin/hbase org.apache.hadoop.yarn.server.timelineservice.storage.TimelineSchemaCreator -create
+```
 
 The `TimelineSchemaCreator` tool supports a few options that may come handy especially when you
 are testing. For example, you can use `-skipExistingTable` (`-s` for short) to skip existing tables
 and continue to create other tables rather than failing the schema creation. By default, the tables
 will have a schema prefix of "prod.". When no option or '-help' ('-h' for short) is provided, the
-command usage is printed.
-and continue to create other tables rather than failing the schema creation. When no option or '-help'
-('-h' for short) is provided, the command usage is printed. By default, the tables
-will have a schema prefix of "prod."
+command usage is printed. The options (-entityTableName, -appToflowTableName, -applicationTableName,
+-subApplicationTableName) will help to override the default table names. On using custom table names,
+The below corresponding configs with custom table name has to be set in hbase-site.xml configured
+at yarn.timeline-service.hbase.configuration.file.
+
+```
+yarn.timeline-service.app-flow.table.name
+yarn.timeline-service.entity.table.name
+yarn.timeline-service.application.table.name
+yarn.timeline-service.subapplication.table.name
+yarn.timeline-service.flowactivity.table.name
+yarn.timeline-service.flowrun.table.name
+yarn.timeline-service.domain.table.name
+
+```
 
 #### Enabling Timeline Service v.2
 Following are the basic configurations to start Timeline service v.2:
@@ -293,14 +326,6 @@ Following are the basic configurations to start Timeline service v.2:
   <description>The setting that controls whether yarn system metrics is
   published on the Timeline service or not by RM And NM.</description>
   <name>yarn.system-metrics-publisher.enabled</name>
-  <value>true</value>
-</property>
-
-<property>
-  <description>The setting that controls whether yarn container events are
-  published to the timeline service or not by RM. This configuration setting
-  is for ATS V2.</description>
-  <name>yarn.rm.system-metrics-publisher.emit-container-events</name>
   <value>true</value>
 </property>
 ```
@@ -381,13 +406,13 @@ To write MapReduce framework data to Timeline Service v.2, enable the following 
 </property>
 ```
 
-### Upgrade from alpha1 to alpha2
+### Upgrade from alpha1 to GA
 If you are currently running Timeline Service v2 alpha1 version, we recommend the following:
 
 - Clear existing data in tables (truncate tables) since the row key for AppToFlow has changed.
 
-- The coprocessor is now a dynamically loaded table level coprocessor in alpha2. We
-recommend dropping the table, replacing the coprocessor jar on hdfs with the alpha2 one,
+- The coprocessor is now a dynamically loaded table level coprocessor in GA. We
+recommend dropping the table, replacing the coprocessor jar on hdfs with the GA one,
 restarting the Region servers and recreating the `flowrun` table.
 
 ### <a name="Publishing_of_application_specific_data"></a> Publishing application specific data
@@ -460,8 +485,7 @@ order. Each event contains one id and a map to store related information and is
 associated with one timestamp.
 * configs: A map from a string (config name) to a string (config value) representing all
 configs associated with the entity. Users can post the whole config or a part of it in the
-configs field. Supported for application and generic entities. Supported for application and
-generic entities.
+configs field. Supported for application and generic entities.
 * metrics: A set of metrics related to this entity. There are two types of metrics: single
 value metric and time series metric. Each metric item contains metric name (id), value, and what
 kind of aggregation operation should be performed in this metric (no­op by default). Supported for

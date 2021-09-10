@@ -29,12 +29,13 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.when;
 
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.Map;
 
-import com.google.common.collect.ImmutableMap;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.thirdparty.com.google.common.collect.ImmutableMap;
+import org.apache.hadoop.test.GenericTestUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.event.Level;
 import org.apache.hadoop.yarn.api.records.ApplicationAttemptId;
 import org.apache.hadoop.yarn.api.records.Container;
 import org.apache.hadoop.yarn.api.records.ContainerId;
@@ -70,9 +71,6 @@ import org.apache.hadoop.yarn.server.utils.BuilderUtils;
 import org.apache.hadoop.yarn.util.resource.DefaultResourceCalculator;
 import org.apache.hadoop.yarn.util.resource.ResourceCalculator;
 import org.apache.hadoop.yarn.util.resource.Resources;
-import org.apache.log4j.Level;
-import org.apache.log4j.LogManager;
-import org.apache.log4j.Logger;
 import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mockito;
@@ -81,7 +79,8 @@ import static org.apache.hadoop.yarn.server.resourcemanager.scheduler.capacity.T
 
 public class TestReservations {
 
-  private static final Log LOG = LogFactory.getLog(TestReservations.class);
+  private static final Logger LOG =
+      LoggerFactory.getLogger(TestReservations.class);
 
   private final RecordFactory recordFactory = RecordFactoryProvider
       .getRecordFactory(null);
@@ -92,11 +91,11 @@ public class TestReservations {
   // CapacitySchedulerConfiguration csConf;
   CapacitySchedulerContext csContext;
 
-  private final ResourceCalculator resourceCalculator = new DefaultResourceCalculator();
+  private final ResourceCalculator resourceCalculator =
+      new DefaultResourceCalculator();
 
   CSQueue root;
-  Map<String, CSQueue> queues = new HashMap<String, CSQueue>();
-  Map<String, CSQueue> oldQueues = new HashMap<String, CSQueue>();
+  private CSQueueStore queues = new CSQueueStore();
 
   final static int GB = 1024;
   final static String DEFAULT_RACK = "/default";
@@ -106,7 +105,6 @@ public class TestReservations {
     CapacityScheduler spyCs = new CapacityScheduler();
     cs = spy(spyCs);
     rmContext = TestUtils.getMockRMContext();
-
   }
 
   private void setup(CapacitySchedulerConfiguration csConf) throws Exception {
@@ -115,6 +113,9 @@ public class TestReservations {
 
   private void setup(CapacitySchedulerConfiguration csConf,
       boolean addUserLimits) throws Exception {
+    //All stub calls on the spy object of the 'cs' field should happen
+    //before cs.start() is invoked. See YARN-10672 for more details.
+    when(cs.getNumClusterNodes()).thenReturn(3);
 
     csConf.setBoolean(CapacitySchedulerConfiguration.ENABLE_USER_METRICS, true);
     final String newRoot = "root" + System.currentTimeMillis();
@@ -157,8 +158,6 @@ public class TestReservations {
     cs.setRMContext(spyRMContext);
     cs.init(csConf);
     cs.start();
-
-    when(cs.getNumClusterNodes()).thenReturn(3);
   }
 
   private static final String A = "a";
@@ -546,7 +545,7 @@ public class TestReservations {
     // Test that with reservations-continue-look-all-nodes feature off
     // we don't unreserve and show we could get stuck
 
-    queues = new HashMap<String, CSQueue>();
+    queues = new CSQueueStore();
     // test that the deadlock occurs when turned off
     CapacitySchedulerConfiguration csConf = new CapacitySchedulerConfiguration();
     csConf.setBoolean(CapacitySchedulerConfiguration.RESERVE_CONT_LOOK_ALL_NODES,
@@ -732,8 +731,7 @@ public class TestReservations {
   @SuppressWarnings("unchecked")
   public void testAssignContainersNeedToUnreserve() throws Exception {
     // Test that we now unreserve and use a node that has space
-    Logger rootLogger = LogManager.getRootLogger();
-    rootLogger.setLevel(Level.DEBUG);
+    GenericTestUtils.setRootLogLevel(Level.DEBUG);
 
     CapacitySchedulerConfiguration csConf = new CapacitySchedulerConfiguration();
     setup(csConf);
@@ -1189,7 +1187,7 @@ public class TestReservations {
 
     csConf.setBoolean(
         CapacitySchedulerConfiguration.RESERVE_CONT_LOOK_ALL_NODES, false);
-    Map<String, CSQueue> newQueues = new HashMap<String, CSQueue>();
+    CSQueueStore newQueues = new CSQueueStore();
     CSQueue newRoot = CapacitySchedulerQueueManager.parseQueue(csContext,
         csConf, null, CapacitySchedulerConfiguration.ROOT, newQueues, queues,
         TestUtils.spyHook);

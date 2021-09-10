@@ -17,7 +17,7 @@
  */
 package org.apache.hadoop.hdfs.tools.offlineImageViewer;
 
-import com.google.common.base.Preconditions;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
 import static org.apache.hadoop.hdfs.server.namenode.FSImageFormatPBINode.ACL_ENTRY_NAME_MASK;
 import static org.apache.hadoop.hdfs.server.namenode.FSImageFormatPBINode.ACL_ENTRY_NAME_OFFSET;
 import static org.apache.hadoop.hdfs.server.namenode.FSImageFormatPBINode.ACL_ENTRY_SCOPE_OFFSET;
@@ -31,10 +31,10 @@ import static org.apache.hadoop.hdfs.tools.offlineImageViewer.PBImageXmlWriter.*
 
 import java.io.BufferedOutputStream;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.nio.file.Files;
@@ -49,10 +49,10 @@ import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.Map;
 
-import com.google.common.io.CountingOutputStream;
-import com.google.common.primitives.Ints;
-import com.google.protobuf.ByteString;
-import com.google.protobuf.TextFormat;
+import org.apache.hadoop.thirdparty.com.google.common.io.CountingOutputStream;
+import org.apache.hadoop.thirdparty.com.google.common.primitives.Ints;
+import org.apache.hadoop.thirdparty.protobuf.ByteString;
+import org.apache.hadoop.thirdparty.protobuf.TextFormat;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -1353,9 +1353,11 @@ class OfflineImageReconstructor {
         if (sd == null) {
           break;
         }
-        Long dir = sd.removeChildLong(SNAPSHOT_SECTION_DIR);
-        sd.verifyNoRemainingKeys("<dir>");
-        bld.addSnapshottableDir(dir);
+        Long dir;
+        while ((dir = sd.removeChildLong(SNAPSHOT_SECTION_DIR)) != null) {
+          // Add all snapshottable directories, one by one
+          bld.addSnapshottableDir(dir);
+        }
       }
       header.verifyNoRemainingKeys("SnapshotSection");
       bld.build().writeDelimitedTo(out);
@@ -1821,16 +1823,16 @@ class OfflineImageReconstructor {
   public static void run(String inputPath, String outputPath)
       throws Exception {
     MessageDigest digester = MD5Hash.getDigester();
-    FileOutputStream fout = null;
+    OutputStream fout = null;
     File foutHash = new File(outputPath + ".md5");
     Files.deleteIfExists(foutHash.toPath()); // delete any .md5 file that exists
     CountingOutputStream out = null;
-    FileInputStream fis = null;
+    InputStream fis = null;
     InputStreamReader reader = null;
     try {
       Files.deleteIfExists(Paths.get(outputPath));
-      fout = new FileOutputStream(outputPath);
-      fis = new FileInputStream(inputPath);
+      fout = Files.newOutputStream(Paths.get(outputPath));
+      fis = Files.newInputStream(Paths.get(inputPath));
       reader = new InputStreamReader(fis, Charset.forName("UTF-8"));
       out = new CountingOutputStream(
           new DigestOutputStream(

@@ -35,8 +35,8 @@ import org.apache.hadoop.tracing.TraceUtils;
 import org.apache.hadoop.util.StringUtils;
 import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
-import org.apache.htrace.core.TraceScope;
-import org.apache.htrace.core.Tracer;
+import org.apache.hadoop.tracing.TraceScope;
+import org.apache.hadoop.tracing.Tracer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -97,7 +97,7 @@ public class FsShell extends Configured implements Tool {
     return this.help;
   }
   
-  protected void init() throws IOException {
+  protected void init() {
     getConf().setQuietMode(true);
     UserGroupInformation.setConfiguration(getConf());
     if (commandFactory == null) {
@@ -298,7 +298,7 @@ public class FsShell extends Configured implements Tool {
    * run
    */
   @Override
-  public int run(String argv[]) throws Exception {
+  public int run(String[] argv) {
     // initialize FsShell
     init();
     Tracer tracer = new Tracer.Builder("FsShell").

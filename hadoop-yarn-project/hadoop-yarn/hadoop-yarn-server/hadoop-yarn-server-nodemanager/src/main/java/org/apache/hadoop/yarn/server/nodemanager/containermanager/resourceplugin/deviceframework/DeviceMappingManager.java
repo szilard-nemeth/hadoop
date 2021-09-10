@@ -18,11 +18,10 @@
 
 package org.apache.hadoop.yarn.server.nodemanager.containermanager.resourceplugin.deviceframework;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.ImmutableSet;
-import com.google.common.collect.Sets;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.collect.ImmutableMap;
+import org.apache.hadoop.thirdparty.com.google.common.collect.ImmutableSet;
+import org.apache.hadoop.util.Sets;
 import org.apache.hadoop.util.StringUtils;
 import org.apache.hadoop.yarn.api.records.ContainerId;
 import org.apache.hadoop.yarn.api.records.Resource;
@@ -32,6 +31,8 @@ import org.apache.hadoop.yarn.server.nodemanager.api.deviceplugin.Device;
 import org.apache.hadoop.yarn.server.nodemanager.api.deviceplugin.DevicePluginScheduler;
 import org.apache.hadoop.yarn.server.nodemanager.containermanager.container.Container;
 import org.apache.hadoop.yarn.server.nodemanager.containermanager.linux.resources.ResourceHandlerException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -51,7 +52,8 @@ import java.util.concurrent.ConcurrentHashMap;
  * scheduler.
  * */
 public class DeviceMappingManager {
-  static final Log LOG = LogFactory.getLog(DeviceMappingManager.class);
+  static final Logger LOG = LoggerFactory.
+      getLogger(DeviceMappingManager.class);
 
   private Context nmContext;
   private static final int WAIT_MS_PER_LOOP = 1000;
@@ -93,6 +95,20 @@ public class DeviceMappingManager {
   @VisibleForTesting
   public Map<String, DevicePluginScheduler> getDevicePluginSchedulers() {
     return devicePluginSchedulers;
+  }
+
+  @VisibleForTesting
+  public Set<Device> getAllocatedDevices(String resourceName,
+      ContainerId cId) {
+    Set<Device> assigned = new TreeSet<>();
+    Map<Device, ContainerId> assignedMap =
+        this.getAllUsedDevices().get(resourceName);
+    for (Map.Entry<Device, ContainerId> entry : assignedMap.entrySet()) {
+      if (entry.getValue().equals(cId)) {
+        assigned.add(entry.getKey());
+      }
+    }
+    return assigned;
   }
 
   public synchronized void addDeviceSet(String resourceName,
@@ -148,8 +164,7 @@ public class DeviceMappingManager {
     ContainerId containerId = container.getContainerId();
     int requestedDeviceCount = getRequestedDeviceCount(resourceName,
         requestedResource);
-    LOG.debug("Try allocating " + requestedDeviceCount
-        + " " + resourceName);
+    LOG.debug("Try allocating {} {}", requestedDeviceCount, resourceName);
     // Assign devices to container if requested some.
     if (requestedDeviceCount > 0) {
       if (requestedDeviceCount > getAvailableDevices(resourceName)) {
@@ -176,7 +191,7 @@ public class DeviceMappingManager {
       DevicePluginScheduler dps = devicePluginSchedulers.get(resourceName);
       // Prefer DevicePluginScheduler logic
       pickAndDoSchedule(allowedDevices, usedDevices, assignedDevices,
-          containerId, requestedDeviceCount, resourceName, dps);
+          container, requestedDeviceCount, resourceName, dps);
 
       // Record in state store if we allocated anything
       if (!assignedDevices.isEmpty()) {
@@ -192,7 +207,7 @@ public class DeviceMappingManager {
       }
 
       return new DeviceAllocation(resourceName, assignedDevices,
-          Sets.difference(allowedDevices, assignedDevices));
+          Sets.differenceInTreeSets(allowedDevices, assignedDevices));
     }
     return new DeviceAllocation(resourceName, null,
         allAllowedDevices.get(resourceName));
@@ -245,18 +260,22 @@ public class DeviceMappingManager {
       ContainerId containerId) {
     Iterator<Map.Entry<Device, ContainerId>> iter =
         allUsedDevices.get(resourceName).entrySet().iterator();
+    Map.Entry<Device, ContainerId> entry;
     while (iter.hasNext()) {
-      if (iter.next().getValue().equals(containerId)) {
+      entry = iter.next();
+      if (entry.getValue().equals(containerId)) {
+        LOG.debug("Recycle devices: {}, type: {} from {}", entry.getKey(),
+            resourceName, containerId);
         iter.remove();
       }
     }
   }
 
-  public static int getRequestedDeviceCount(String resourceName,
+  public static int getRequestedDeviceCount(String resName,
       Resource requestedResource) {
     try {
       return Long.valueOf(requestedResource.getResourceValue(
-          resourceName)).intValue();
+          resName)).intValue();
     } catch (ResourceNotFoundException e) {
       return 0;
     }
@@ -270,10 +289,7 @@ public class DeviceMappingManager {
   private long getReleasingDevices(String resourceName) {
     long releasingDevices = 0;
     Map<Device, ContainerId> used = allUsedDevices.get(resourceName);
-    Iterator<Map.Entry<Device, ContainerId>> iter = used.entrySet()
-        .iterator();
-    while (iter.hasNext()) {
-      ContainerId containerId = iter.next().getValue();
+    for (ContainerId containerId : ImmutableSet.copyOf(used.values())) {
       Container container = nmContext.getContainers().get(containerId);
       if (container != null) {
         if (container.isContainerInFinalStates()) {
@@ -291,24 +307,29 @@ public class DeviceMappingManager {
    * */
   private void pickAndDoSchedule(Set<Device> allowed,
       Map<Device, ContainerId> used, Set<Device> assigned,
-      ContainerId containerId, int count, String resourceName,
-      DevicePluginScheduler dps) throws ResourceHandlerException {
-
+      Container c, int count, String resourceName,
+      DevicePluginScheduler dps)
+      throws ResourceHandlerException {
+    ContainerId containerId = c.getContainerId();
+    Map<String, String> env = c.getLaunchContext().getEnvironment();
     if (null == dps) {
       LOG.debug("Customized device plugin scheduler is preferred "
           + "but not implemented, use default logic");
       defaultScheduleAction(allowed, used,
           assigned, containerId, count);
     } else {
-      LOG.debug("Customized device plugin implemented,"
-          + "use customized logic");
-      // Use customized device scheduler
-      LOG.debug("Try to schedule " + count
-          + "(" + resourceName + ") using " + dps.getClass());
+      if (LOG.isDebugEnabled()) {
+        LOG.debug("Customized device plugin implemented,"
+            + "use customized logic");
+        // Use customized device scheduler
+        LOG.debug("Try to schedule " + count
+            + "(" + resourceName + ") using " + dps.getClass());
+      }
       // Pass in unmodifiable set
       Set<Device> dpsAllocated = dps.allocateDevices(
-          Sets.difference(allowed, used.keySet()),
-          count);
+          Sets.differenceInTreeSets(allowed, used.keySet()),
+          count,
+          ImmutableMap.copyOf(env));
       if (dpsAllocated.size() != count) {
         throw new ResourceHandlerException(dps.getClass()
             + " should allocate " + count
@@ -345,6 +366,7 @@ public class DeviceMappingManager {
     private String resourceName;
 
     private Set<Device> allowed = Collections.emptySet();
+
     private Set<Device> denied = Collections.emptySet();
 
     DeviceAllocation(String resName, Set<Device> a,
@@ -360,6 +382,10 @@ public class DeviceMappingManager {
 
     public Set<Device> getAllowed() {
       return allowed;
+    }
+
+    public Set<Device> getDenied() {
+      return denied;
     }
 
     @Override

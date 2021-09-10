@@ -17,9 +17,11 @@
  */
 package org.apache.hadoop.hdfs.server.datanode.metrics;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Maps;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hdfs.DFSConfigKeys;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.collect.ImmutableMap;
+import org.apache.hadoop.thirdparty.com.google.common.collect.Maps;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;
 import org.apache.hadoop.hdfs.server.datanode.DataNode;
@@ -48,8 +50,6 @@ public class DataNodeDiskMetrics {
       DataNodeDiskMetrics.class);
 
   private DataNode dn;
-  private final long MIN_OUTLIER_DETECTION_DISKS = 5;
-  private final long SLOW_DISK_LOW_THRESHOLD_MS = 20;
   private final long detectionInterval;
   private volatile boolean shouldRun;
   private OutlierDetector slowDiskDetector;
@@ -57,11 +57,31 @@ public class DataNodeDiskMetrics {
   private volatile Map<String, Map<DiskOp, Double>>
       diskOutliersStats = Maps.newHashMap();
 
-  public DataNodeDiskMetrics(DataNode dn, long diskOutlierDetectionIntervalMs) {
+  // Adding for test purpose. When addSlowDiskForTesting() called from test
+  // code, status should not be overridden by daemon thread.
+  private boolean overrideStatus = true;
+
+  /**
+   * Minimum number of disks to run outlier detection.
+   */
+  private final long minOutlierDetectionDisks;
+  /**
+   * Threshold in milliseconds below which a disk is definitely not slow.
+   */
+  private final long lowThresholdMs;
+
+  public DataNodeDiskMetrics(DataNode dn, long diskOutlierDetectionIntervalMs,
+      Configuration conf) {
     this.dn = dn;
     this.detectionInterval = diskOutlierDetectionIntervalMs;
-    slowDiskDetector = new OutlierDetector(MIN_OUTLIER_DETECTION_DISKS,
-        SLOW_DISK_LOW_THRESHOLD_MS);
+    minOutlierDetectionDisks =
+        conf.getLong(DFSConfigKeys.DFS_DATANODE_MIN_OUTLIER_DETECTION_DISKS_KEY,
+            DFSConfigKeys.DFS_DATANODE_MIN_OUTLIER_DETECTION_DISKS_DEFAULT);
+    lowThresholdMs =
+        conf.getLong(DFSConfigKeys.DFS_DATANODE_SLOWDISK_LOW_THRESHOLD_MS_KEY,
+            DFSConfigKeys.DFS_DATANODE_SLOWDISK_LOW_THRESHOLD_MS_DEFAULT);
+    slowDiskDetector =
+        new OutlierDetector(minOutlierDetectionDisks, lowThresholdMs);
     shouldRun = true;
     startDiskOutlierDetectionThread();
   }
@@ -71,41 +91,43 @@ public class DataNodeDiskMetrics {
       @Override
       public void run() {
         while (shouldRun) {
-          Map<String, Double> metadataOpStats = Maps.newHashMap();
-          Map<String, Double> readIoStats = Maps.newHashMap();
-          Map<String, Double> writeIoStats = Maps.newHashMap();
-          FsDatasetSpi.FsVolumeReferences fsVolumeReferences = null;
-          try {
-            fsVolumeReferences = dn.getFSDataset().getFsVolumeReferences();
-            Iterator<FsVolumeSpi> volumeIterator = fsVolumeReferences
-                .iterator();
-            while (volumeIterator.hasNext()) {
-              FsVolumeSpi volume = volumeIterator.next();
-              DataNodeVolumeMetrics metrics = volumeIterator.next().getMetrics();
-              String volumeName = volume.getBaseURI().getPath();
+          if (dn.getFSDataset() != null) {
+            Map<String, Double> metadataOpStats = Maps.newHashMap();
+            Map<String, Double> readIoStats = Maps.newHashMap();
+            Map<String, Double> writeIoStats = Maps.newHashMap();
+            FsDatasetSpi.FsVolumeReferences fsVolumeReferences = null;
+            try {
+              fsVolumeReferences = dn.getFSDataset().getFsVolumeReferences();
+              Iterator<FsVolumeSpi> volumeIterator = fsVolumeReferences
+                  .iterator();
+              while (volumeIterator.hasNext()) {
+                FsVolumeSpi volume = volumeIterator.next();
+                DataNodeVolumeMetrics metrics = volume.getMetrics();
+                String volumeName = volume.getBaseURI().getPath();
 
-              metadataOpStats.put(volumeName,
-                  metrics.getMetadataOperationMean());
-              readIoStats.put(volumeName, metrics.getReadIoMean());
-              writeIoStats.put(volumeName, metrics.getWriteIoMean());
-            }
-          } finally {
-            if (fsVolumeReferences != null) {
-              try {
-                fsVolumeReferences.close();
-              } catch (IOException e) {
-                LOG.error("Error in releasing FS Volume references", e);
+                metadataOpStats.put(volumeName,
+                    metrics.getMetadataOperationMean());
+                readIoStats.put(volumeName, metrics.getReadIoMean());
+                writeIoStats.put(volumeName, metrics.getWriteIoMean());
+              }
+            } finally {
+              if (fsVolumeReferences != null) {
+                try {
+                  fsVolumeReferences.close();
+                } catch (IOException e) {
+                  LOG.error("Error in releasing FS Volume references", e);
+                }
               }
             }
-          }
-          if (metadataOpStats.isEmpty() && readIoStats.isEmpty() &&
-              writeIoStats.isEmpty()) {
-            LOG.debug("No disk stats available for detecting outliers.");
-            return;
-          }
+            if (metadataOpStats.isEmpty() && readIoStats.isEmpty()
+                && writeIoStats.isEmpty()) {
+              LOG.debug("No disk stats available for detecting outliers.");
+              continue;
+            }
 
-          detectAndUpdateDiskOutliers(metadataOpStats, readIoStats,
-              writeIoStats);
+            detectAndUpdateDiskOutliers(metadataOpStats, readIoStats,
+                writeIoStats);
+          }
 
           try {
             Thread.sleep(detectionInterval);
@@ -143,9 +165,10 @@ public class DataNodeDiskMetrics {
     for (Map.Entry<String, Double> entry : writeIoOutliers.entrySet()) {
       addDiskStat(diskStats, entry.getKey(), DiskOp.WRITE, entry.getValue());
     }
-
-    diskOutliersStats = diskStats;
-    LOG.debug("Updated disk outliers.");
+    if (overrideStatus) {
+      diskOutliersStats = diskStats;
+      LOG.debug("Updated disk outliers.");
+    }
   }
 
   private void addDiskStat(Map<String, Map<DiskOp, Double>> diskStats,
@@ -176,6 +199,7 @@ public class DataNodeDiskMetrics {
   @VisibleForTesting
   public void addSlowDiskForTesting(String slowDiskPath,
       Map<DiskOp, Double> latencies) {
+    overrideStatus = false;
     if (latencies == null) {
       diskOutliersStats.put(slowDiskPath, ImmutableMap.of());
     } else {

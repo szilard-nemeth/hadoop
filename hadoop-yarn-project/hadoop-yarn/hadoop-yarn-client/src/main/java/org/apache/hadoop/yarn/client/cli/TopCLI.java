@@ -43,9 +43,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLSocketFactory;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.cache.Cache;
-import com.google.common.cache.CacheBuilder;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.cache.Cache;
+import org.apache.hadoop.thirdparty.com.google.common.cache.CacheBuilder;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.GnuParser;
 import org.apache.commons.cli.HelpFormatter;
@@ -444,6 +444,7 @@ public class TopCLI extends YarnCLI {
 
   public static void main(String[] args) throws Exception {
     TopCLI topImp = new TopCLI();
+    topImp.addShutdownHook();
     topImp.setSysOutPrintStream(System.out);
     topImp.setSysErrPrintStream(System.err);
     int res = ToolRunner.run(topImp, args);
@@ -492,7 +493,6 @@ public class TopCLI extends YarnCLI {
         rmStartTime = getRMStartTime();
       }
     }
-    clearScreen();
     return 0;
   }
 
@@ -871,43 +871,47 @@ public class TopCLI extends YarnCLI {
     String currentTime = DateFormatUtils.ISO_8601_EXTENDED_TIME_FORMAT
         .format(now);
 
-    ret.append(CLEAR_LINE);
-    ret.append(limitLineLength(String.format(
-      "YARN top - %s, up %s, %d active users, queue(s): %s%n", currentTime,
-      uptimeStr, queueMetrics.activeUsers, queue), terminalWidth, true));
+    ret.append(CLEAR_LINE)
+        .append(limitLineLength(String.format(
+            "YARN top - %s, up %s, %d active users, queue(s): %s%n",
+            currentTime, uptimeStr, queueMetrics.activeUsers, queue),
+            terminalWidth, true));
 
-    ret.append(CLEAR_LINE);
-    ret.append(limitLineLength(String.format(
-      "NodeManager(s): %d total, %d active, %d unhealthy, %d decommissioned,"
-          + " %d lost, %d rebooted%n", nodes.totalNodes, nodes.runningNodes,
-      nodes.unhealthyNodes, nodes.decommissionedNodes, nodes.lostNodes,
-      nodes.rebootedNodes), terminalWidth, true));
+    ret.append(CLEAR_LINE)
+        .append(limitLineLength(String.format(
+            "NodeManager(s)"
+                + ": %d total, %d active, %d unhealthy, %d decommissioned,"
+                + " %d lost, %d rebooted%n",
+            nodes.totalNodes, nodes.runningNodes, nodes.unhealthyNodes,
+            nodes.decommissionedNodes, nodes.lostNodes,
+            nodes.rebootedNodes), terminalWidth, true));
 
-    ret.append(CLEAR_LINE);
-    ret.append(limitLineLength(String.format(
-        "Queue(s) Applications: %d running, %d submitted, %d pending,"
-            + " %d completed, %d killed, %d failed%n", queueMetrics.appsRunning,
-        queueMetrics.appsSubmitted, queueMetrics.appsPending,
-        queueMetrics.appsCompleted, queueMetrics.appsKilled,
-        queueMetrics.appsFailed), terminalWidth, true));
+    ret.append(CLEAR_LINE)
+        .append(limitLineLength(String.format(
+            "Queue(s) Applications: %d running, %d submitted, %d pending,"
+                + " %d completed, %d killed, %d failed%n",
+            queueMetrics.appsRunning, queueMetrics.appsSubmitted,
+            queueMetrics.appsPending, queueMetrics.appsCompleted,
+            queueMetrics.appsKilled, queueMetrics.appsFailed), terminalWidth,
+            true));
 
-    ret.append(CLEAR_LINE);
-    ret.append(limitLineLength(String.format("Queue(s) Mem(GB): %d available,"
-        + " %d allocated, %d pending, %d reserved%n",
-      queueMetrics.availableMemoryGB, queueMetrics.allocatedMemoryGB,
-      queueMetrics.pendingMemoryGB, queueMetrics.reservedMemoryGB),
-      terminalWidth, true));
+    ret.append(CLEAR_LINE)
+        .append(limitLineLength(String.format("Queue(s) Mem(GB): %d available,"
+            + " %d allocated, %d pending, %d reserved%n",
+            queueMetrics.availableMemoryGB, queueMetrics.allocatedMemoryGB,
+            queueMetrics.pendingMemoryGB, queueMetrics.reservedMemoryGB),
+            terminalWidth, true));
 
-    ret.append(CLEAR_LINE);
-    ret.append(limitLineLength(String.format("Queue(s) VCores: %d available,"
-        + " %d allocated, %d pending, %d reserved%n",
-      queueMetrics.availableVCores, queueMetrics.allocatedVCores,
-      queueMetrics.pendingVCores, queueMetrics.reservedVCores), terminalWidth,
-      true));
+    ret.append(CLEAR_LINE)
+        .append(limitLineLength(String.format("Queue(s) VCores: %d available,"
+            + " %d allocated, %d pending, %d reserved%n",
+            queueMetrics.availableVCores, queueMetrics.allocatedVCores,
+            queueMetrics.pendingVCores, queueMetrics.reservedVCores),
+            terminalWidth, true));
 
-    ret.append(CLEAR_LINE);
-    ret.append(limitLineLength(String.format(
-        "Queue(s) Containers: %d allocated, %d pending, %d reserved%n",
+    ret.append(CLEAR_LINE)
+        .append(limitLineLength(String.format(
+            "Queue(s) Containers: %d allocated, %d pending, %d reserved%n",
             queueMetrics.allocatedContainers, queueMetrics.pendingContainers,
             queueMetrics.reservedContainers), terminalWidth, true));
     return ret.toString();
@@ -1215,5 +1219,12 @@ public class TopCLI extends YarnCLI {
     p.waitFor();
     byte[] output = IOUtils.toByteArray(p.getInputStream());
     return new String(output, "ASCII");
+  }
+
+  private void addShutdownHook() {
+    //clear screen when the program exits
+    Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+      clearScreen();
+    }));
   }
 }

@@ -53,7 +53,7 @@ import com.amazonaws.services.s3.model.S3Object;
 import com.amazonaws.services.s3.model.S3ObjectSummary;
 import com.amazonaws.services.s3.model.UploadPartRequest;
 import com.amazonaws.services.s3.model.UploadPartResult;
-import com.google.common.base.Preconditions;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -199,6 +199,7 @@ public class InconsistentAmazonS3Client extends AmazonS3Client {
       deleteObjectsRequest)
       throws AmazonClientException, AmazonServiceException {
     maybeFail();
+    LOG.info("registering bulk delete of objects");
     for (DeleteObjectsRequest.KeyVersion keyVersion :
         deleteObjectsRequest.getKeys()) {
       registerDeleteObject(keyVersion.getKey(),
@@ -278,6 +279,7 @@ public class InconsistentAmazonS3Client extends AmazonS3Client {
     // Behavior of S3ObjectSummary
     String key = item.getKey();
     if (list.stream().noneMatch((member) -> member.getKey().equals(key))) {
+      LOG.debug("Reinstate summary {}", key);
       list.add(item);
     }
   }
@@ -302,6 +304,7 @@ public class InconsistentAmazonS3Client extends AmazonS3Client {
       if (nextParent.equals(ancestorPath)) {
         String prefix = prefixCandidate.toString();
         if (!prefixes.contains(prefix)) {
+          LOG.debug("Reinstate prefix {}", prefix);
           prefixes.add(prefix);
         }
         return;
@@ -327,7 +330,9 @@ public class InconsistentAmazonS3Client extends AmazonS3Client {
     } else {
       Path actualParentPath = new Path(child).getParent();
       Path expectedParentPath = new Path(parent);
-      return actualParentPath.equals(expectedParentPath);
+      // children which are directory markers are excluded here
+      return actualParentPath.equals(expectedParentPath)
+          && !child.endsWith("/");
     }
   }
 
@@ -401,6 +406,7 @@ public class InconsistentAmazonS3Client extends AmazonS3Client {
         }
       } else {
         // Clean up any expired entries
+        LOG.debug("Remove expired key {}", key);
         delayedDeletes.remove(key);
       }
     }
@@ -467,16 +473,24 @@ public class InconsistentAmazonS3Client extends AmazonS3Client {
 
   private void registerDeleteObject(String key, String bucket) {
     if (policy.shouldDelay(key)) {
-      // Record summary so we can add it back for some time post-deletion
-      ListObjectsRequest request = new ListObjectsRequest()
-              .withBucketName(bucket)
-              .withPrefix(key);
-      S3ObjectSummary summary = innerlistObjects(request).getObjectSummaries()
-          .stream()
-          .filter(result -> result.getKey().equals(key))
-          .findFirst()
-          .orElse(null);
-      delayedDeletes.put(key, new Delete(System.currentTimeMillis(), summary));
+      Delete delete = delayedDeletes.get(key);
+      if (delete != null && isKeyDelayed(delete.time(), key)) {
+        // there is already an entry in the delayed delete list,
+        // so ignore the operation
+        LOG.debug("Ignoring delete of already deleted object");
+      } else {
+        // Record summary so we can add it back for some time post-deletion
+        ListObjectsRequest request = new ListObjectsRequest()
+            .withBucketName(bucket)
+            .withPrefix(key);
+        S3ObjectSummary summary = innerlistObjects(request).getObjectSummaries()
+            .stream()
+            .filter(result -> result.getKey().equals(key))
+            .findFirst()
+            .orElse(null);
+        delayedDeletes.put(key, new Delete(System.currentTimeMillis(),
+            summary));
+      }
     }
   }
 

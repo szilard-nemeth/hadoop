@@ -19,6 +19,7 @@ package org.apache.hadoop.hdfs.server.federation.store.records;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
@@ -165,6 +166,24 @@ public class TestMountTable {
   }
 
   @Test
+  public void testFaultTolerant() throws IOException {
+
+    Map<String, String> dest = new LinkedHashMap<>();
+    dest.put(DST_NS_0, DST_PATH_0);
+    dest.put(DST_NS_1, DST_PATH_1);
+    MountTable record0 = MountTable.newInstance(SRC, dest);
+    assertFalse(record0.isFaultTolerant());
+
+    MountTable record1 = MountTable.newInstance(SRC, dest);
+    assertFalse(record1.isFaultTolerant());
+    assertEquals(record0, record1);
+
+    record1.setFaultTolerant(true);
+    assertTrue(record1.isFaultTolerant());
+    assertNotEquals(record0, record1);
+  }
+
+  @Test
   public void testOrder() throws IOException {
     testOrder(DestinationOrder.HASH);
     testOrder(DestinationOrder.LOCAL);
@@ -247,7 +266,7 @@ public class TestMountTable {
       fail("Mount table entry should be created failed.");
     } catch (Exception e) {
       GenericTestUtils.assertExceptionContains(
-          MountTable.ERROR_MSG_INVAILD_DEST_NS, e);
+          MountTable.ERROR_MSG_INVALID_DEST_NS, e);
     }
 
     destinations.clear();

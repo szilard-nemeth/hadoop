@@ -34,9 +34,8 @@ import com.amazonaws.services.dynamodbv2.model.ResourceNotFoundException;
 import com.amazonaws.services.s3.model.AmazonS3Exception;
 import com.amazonaws.services.s3.model.MultiObjectDeleteException;
 import com.amazonaws.services.s3.model.S3ObjectSummary;
-
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.hadoop.classification.InterfaceAudience;
@@ -47,14 +46,15 @@ import org.apache.hadoop.fs.LocatedFileStatus;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.PathFilter;
 import org.apache.hadoop.fs.RemoteIterator;
+import org.apache.hadoop.util.functional.RemoteIterators;
 import org.apache.hadoop.fs.s3a.auth.IAMInstanceCredentialsProvider;
-import org.apache.hadoop.fs.s3a.auth.NoAuthWithAWSException;
+import org.apache.hadoop.fs.s3a.impl.NetworkBinding;
 import org.apache.hadoop.fs.s3native.S3xLoginHelper;
 import org.apache.hadoop.net.ConnectTimeoutException;
 import org.apache.hadoop.security.ProviderUtils;
 import org.apache.hadoop.util.VersionInfo;
 
-import com.google.common.collect.Lists;
+import org.apache.hadoop.util.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -82,9 +82,15 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 
 import static org.apache.commons.lang3.StringUtils.isEmpty;
 import static org.apache.hadoop.fs.s3a.Constants.*;
+import static org.apache.hadoop.fs.s3a.impl.ErrorTranslation.isUnknownBucket;
+import static org.apache.hadoop.fs.s3a.impl.InternalConstants.CSE_PADDING_LENGTH;
+import static org.apache.hadoop.fs.s3a.impl.MultiObjectDeleteSupport.translateDeleteException;
+import static org.apache.hadoop.io.IOUtils.cleanupWithLogger;
+import static org.apache.hadoop.util.functional.RemoteIterators.filteringRemoteIterator;
 
 /**
  * Utility methods for S3A code.
@@ -127,8 +133,11 @@ public final class S3AUtils {
       S3AEncryptionMethods.SSE_S3.getMethod()
           + " is enabled but an encryption key was set in "
           + SERVER_SIDE_ENCRYPTION_KEY;
-  private static final String EOF_MESSAGE_IN_XML_PARSER
+  public static final String EOF_MESSAGE_IN_XML_PARSER
       = "Failed to sanitize XML document destined for handler class";
+
+  public static final String EOF_READ_DIFFERENT_LENGTH
+      = "Data read has a different length than the expected";
 
   private static final String BUCKET_PATTERN = FS_S3A_BUCKET_PREFIX + "%s.%s";
 
@@ -189,13 +198,14 @@ public final class S3AUtils {
         // interrupted IO, or a socket exception underneath that class
         return translateInterruptedException(exception, innerCause, message);
       }
-      if (signifiesConnectionBroken(exception)) {
+      if (isMessageTranslatableToEOF(exception)) {
         // call considered an sign of connectivity failure
         return (EOFException)new EOFException(message).initCause(exception);
       }
-      if (exception instanceof NoAuthWithAWSException) {
+      if (exception instanceof CredentialInitializationException) {
         // the exception raised by AWSCredentialProvider list if the
-        // credentials were not accepted.
+        // credentials were not accepted,
+        // or auditing blocked the operation.
         return (AccessDeniedException)new AccessDeniedException(path, null,
             exception.toString()).initCause(exception);
       }
@@ -246,6 +256,18 @@ public final class S3AUtils {
 
       // the object isn't there
       case 404:
+        if (isUnknownBucket(ase)) {
+          // this is a missing bucket
+          ioe = new UnknownStoreException(path, message, ase);
+        } else {
+          // a normal unknown object
+          ioe = new FileNotFoundException(message);
+          ioe.initCause(ase);
+        }
+        break;
+
+      // this also surfaces sometimes and is considered to
+      // be ~ a not found exception.
       case 410:
         ioe = new FileNotFoundException(message);
         ioe.initCause(ase);
@@ -285,7 +307,7 @@ public final class S3AUtils {
       case 200:
         if (exception instanceof MultiObjectDeleteException) {
           // failure during a bulk delete
-          return translateMultiObjectDeleteException(message,
+          return translateDeleteException(message,
               (MultiObjectDeleteException) exception);
         }
         // other 200: FALL THROUGH
@@ -397,13 +419,14 @@ public final class S3AUtils {
 
   /**
    * Cue that an AWS exception is likely to be an EOF Exception based
-   * on the message coming back from an XML/JSON parser. This is likely
-   * to be brittle, so only a hint.
+   * on the message coming back from the client. This is likely to be
+   * brittle, so only a hint.
    * @param ex exception
    * @return true if this is believed to be a sign the connection was broken.
    */
-  public static boolean signifiesConnectionBroken(SdkBaseException ex) {
-    return ex.toString().contains(EOF_MESSAGE_IN_XML_PARSER);
+  public static boolean isMessageTranslatableToEOF(SdkBaseException ex) {
+    return ex.toString().contains(EOF_MESSAGE_IN_XML_PARSER) ||
+            ex.toString().contains(EOF_READ_DIFFERENT_LENGTH);
   }
 
   /**
@@ -447,40 +470,6 @@ public final class S3AUtils {
       result = new AWSServiceIOException(message, ddbException);
     }
     return result;
-  }
-
-  /**
-   * A MultiObjectDeleteException is raised if one or more delete objects
-   * listed in a bulk DELETE operation failed.
-   * The top-level exception is therefore just "something wasn't deleted",
-   * but doesn't include the what or the why.
-   * This translation will extract an AccessDeniedException if that's one of
-   * the causes, otherwise grabs the status code and uses it in the
-   * returned exception.
-   * @param message text for the exception
-   * @param ex exception to translate
-   * @return an IOE with more detail.
-   */
-  public static IOException translateMultiObjectDeleteException(String message,
-      MultiObjectDeleteException ex) {
-    List<String> keys;
-    StringBuffer result = new StringBuffer(ex.getErrors().size() * 100);
-    result.append(message).append(": ");
-    String exitCode = "";
-    for (MultiObjectDeleteException.DeleteError error : ex.getErrors()) {
-      String code = error.getCode();
-      result.append(String.format("%s: %s: %s%n", code, error.getKey(),
-          error.getMessage()));
-      if (exitCode.isEmpty() ||  "AccessDenied".equals(code)) {
-        exitCode = code;
-      }
-    }
-    if ("AccessDenied".equals(exitCode)) {
-      return (IOException) new AccessDeniedException(result.toString())
-          .initCause(ex);
-    } else {
-      return new AWSS3IOException(result.toString(), ex);
-    }
   }
 
   /**
@@ -531,16 +520,26 @@ public final class S3AUtils {
    * @param summary summary from AWS
    * @param blockSize block size to declare.
    * @param owner owner of the file
+   * @param eTag S3 object eTag or null if unavailable
+   * @param versionId S3 object versionId or null if unavailable
+   * @param isCSEEnabled is client side encryption enabled?
    * @return a status entry
    */
   public static S3AFileStatus createFileStatus(Path keyPath,
       S3ObjectSummary summary,
       long blockSize,
-      String owner) {
+      String owner,
+      String eTag,
+      String versionId,
+      boolean isCSEEnabled) {
     long size = summary.getSize();
+    // check if cse is enabled; strip out constant padding length.
+    if (isCSEEnabled && size >= CSE_PADDING_LENGTH) {
+      size -= CSE_PADDING_LENGTH;
+    }
     return createFileStatus(keyPath,
-        objectRepresentsDirectory(summary.getKey(), size),
-        size, summary.getLastModified(), blockSize, owner);
+        objectRepresentsDirectory(summary.getKey()),
+        size, summary.getLastModified(), blockSize, owner, eTag, versionId);
   }
 
   /**
@@ -553,36 +552,38 @@ public final class S3AUtils {
    * @param size file length
    * @param blockSize block size for file status
    * @param owner Hadoop username
+   * @param eTag S3 object eTag or null if unavailable
+   * @param versionId S3 object versionId or null if unavailable
    * @return a status entry
    */
   public static S3AFileStatus createUploadFileStatus(Path keyPath,
-      boolean isDir, long size, long blockSize, String owner) {
+      boolean isDir, long size, long blockSize, String owner,
+      String eTag, String versionId) {
     Date date = isDir ? null : new Date();
-    return createFileStatus(keyPath, isDir, size, date, blockSize, owner);
+    return createFileStatus(keyPath, isDir, size, date, blockSize, owner,
+        eTag, versionId);
   }
 
   /* Date 'modified' is ignored when isDir is true. */
   private static S3AFileStatus createFileStatus(Path keyPath, boolean isDir,
-      long size, Date modified, long blockSize, String owner) {
+      long size, Date modified, long blockSize, String owner,
+      String eTag, String versionId) {
     if (isDir) {
       return new S3AFileStatus(Tristate.UNKNOWN, keyPath, owner);
     } else {
       return new S3AFileStatus(size, dateToLong(modified), keyPath, blockSize,
-          owner);
+          owner, eTag, versionId);
     }
   }
 
   /**
    * Predicate: does the object represent a directory?.
    * @param name object name
-   * @param size object size
    * @return true if it meets the criteria for being an object
    */
-  public static boolean objectRepresentsDirectory(final String name,
-      final long size) {
+  public static boolean objectRepresentsDirectory(final String name) {
     return !name.isEmpty()
-        && name.charAt(name.length() - 1) == '/'
-        && size == 0L;
+        && name.charAt(name.length() - 1) == '/';
   }
 
   /**
@@ -988,7 +989,7 @@ public final class S3AUtils {
   }
 
   /**
-   * Get a integer option >= the minimum allowed value.
+   * Get a integer option &gt;= the minimum allowed value.
    * @param conf configuration
    * @param key key to look up
    * @param defVal default value
@@ -996,7 +997,7 @@ public final class S3AUtils {
    * @return the value
    * @throws IllegalArgumentException if the value is below the minimum
    */
-  static int intOption(Configuration conf, String key, int defVal, int min) {
+  public static int intOption(Configuration conf, String key, int defVal, int min) {
     int v = conf.getInt(key, defVal);
     Preconditions.checkArgument(v >= min,
         String.format("Value of %s: %d is below the minimum value %d",
@@ -1006,7 +1007,7 @@ public final class S3AUtils {
   }
 
   /**
-   * Get a long option >= the minimum allowed value.
+   * Get a long option &gt;= the minimum allowed value.
    * @param conf configuration
    * @param key key to look up
    * @param defVal default value
@@ -1014,7 +1015,7 @@ public final class S3AUtils {
    * @return the value
    * @throws IllegalArgumentException if the value is below the minimum
    */
-  static long longOption(Configuration conf,
+  public static long longOption(Configuration conf,
       String key,
       long defVal,
       long min) {
@@ -1156,7 +1157,7 @@ public final class S3AUtils {
   public static Configuration propagateBucketOptions(Configuration source,
       String bucket) {
 
-    Preconditions.checkArgument(StringUtils.isNotEmpty(bucket), "bucket");
+    Preconditions.checkArgument(StringUtils.isNotEmpty(bucket), "bucket is null/empty");
     final String bucketPrefix = FS_S3A_BUCKET_PREFIX + bucket +'.';
     LOG.debug("Propagating entries under {}", bucketPrefix);
     final Configuration dest = new Configuration(source);
@@ -1227,14 +1228,59 @@ public final class S3AUtils {
    * @param bucket Optional bucket to use to look up per-bucket proxy secrets
    * @return new AWS client configuration
    * @throws IOException problem creating AWS client configuration
+   *
+   * @deprecated use {@link #createAwsConf(Configuration, String, String)}
    */
+  @Deprecated
   public static ClientConfiguration createAwsConf(Configuration conf,
       String bucket)
+      throws IOException {
+    return createAwsConf(conf, bucket, null);
+  }
+
+  /**
+   * Create a new AWS {@code ClientConfiguration}. All clients to AWS services
+   * <i>MUST</i> use this or the equivalents for the specific service for
+   * consistent setup of connectivity, UA, proxy settings.
+   *
+   * @param conf The Hadoop configuration
+   * @param bucket Optional bucket to use to look up per-bucket proxy secrets
+   * @param awsServiceIdentifier a string representing the AWS service (S3,
+   * DDB, etc) for which the ClientConfiguration is being created.
+   * @return new AWS client configuration
+   * @throws IOException problem creating AWS client configuration
+   */
+  public static ClientConfiguration createAwsConf(Configuration conf,
+      String bucket, String awsServiceIdentifier)
       throws IOException {
     final ClientConfiguration awsConf = new ClientConfiguration();
     initConnectionSettings(conf, awsConf);
     initProxySupport(conf, bucket, awsConf);
     initUserAgent(conf, awsConf);
+    if (StringUtils.isNotEmpty(awsServiceIdentifier)) {
+      String configKey = null;
+      switch (awsServiceIdentifier) {
+      case AWS_SERVICE_IDENTIFIER_S3:
+        configKey = SIGNING_ALGORITHM_S3;
+        break;
+      case AWS_SERVICE_IDENTIFIER_DDB:
+        configKey = SIGNING_ALGORITHM_DDB;
+        break;
+      case AWS_SERVICE_IDENTIFIER_STS:
+        configKey = SIGNING_ALGORITHM_STS;
+        break;
+      default:
+        // Nothing to do. The original signer override is already setup
+      }
+      if (configKey != null) {
+        String signerOverride = conf.getTrimmed(configKey, "");
+        if (!signerOverride.isEmpty()) {
+          LOG.debug("Signer override for {}} = {}", awsServiceIdentifier,
+              signerOverride);
+          awsConf.setSignerOverride(signerOverride);
+        }
+      }
+    }
     return awsConf;
   }
 
@@ -1243,14 +1289,15 @@ public final class S3AUtils {
    *
    * @param conf Hadoop configuration
    * @param awsConf AWS SDK configuration
+   *
+   * @throws IOException if there was an error initializing the protocol
+   *                     settings
    */
   public static void initConnectionSettings(Configuration conf,
-      ClientConfiguration awsConf) {
+      ClientConfiguration awsConf) throws IOException {
     awsConf.setMaxConnections(intOption(conf, MAXIMUM_CONNECTIONS,
         DEFAULT_MAXIMUM_CONNECTIONS, 1));
-    boolean secureConnections = conf.getBoolean(SECURE_CONNECTIONS,
-        DEFAULT_SECURE_CONNECTIONS);
-    awsConf.setProtocol(secureConnections ?  Protocol.HTTPS : Protocol.HTTP);
+    initProtocolSettings(conf, awsConf);
     awsConf.setMaxErrorRetry(intOption(conf, MAX_ERROR_RETRIES,
         DEFAULT_MAX_ERROR_RETRIES, 0));
     awsConf.setConnectionTimeout(intOption(conf, ESTABLISH_TIMEOUT,
@@ -1261,11 +1308,41 @@ public final class S3AUtils {
         DEFAULT_SOCKET_SEND_BUFFER, 2048);
     int sockRecvBuffer = intOption(conf, SOCKET_RECV_BUFFER,
         DEFAULT_SOCKET_RECV_BUFFER, 2048);
+    long requestTimeoutMillis = conf.getTimeDuration(REQUEST_TIMEOUT,
+        DEFAULT_REQUEST_TIMEOUT, TimeUnit.SECONDS, TimeUnit.MILLISECONDS);
+
+    if (requestTimeoutMillis > Integer.MAX_VALUE) {
+      LOG.debug("Request timeout is too high({} ms). Setting to {} ms instead",
+          requestTimeoutMillis, Integer.MAX_VALUE);
+      requestTimeoutMillis = Integer.MAX_VALUE;
+    }
+    awsConf.setRequestTimeout((int) requestTimeoutMillis);
     awsConf.setSocketBufferSizeHints(sockSendBuffer, sockRecvBuffer);
     String signerOverride = conf.getTrimmed(SIGNING_ALGORITHM, "");
     if (!signerOverride.isEmpty()) {
      LOG.debug("Signer override = {}", signerOverride);
       awsConf.setSignerOverride(signerOverride);
+    }
+  }
+
+  /**
+   * Initializes the connection protocol settings when connecting to S3 (e.g.
+   * either HTTP or HTTPS). If secure connections are enabled, this method
+   * will load the configured SSL providers.
+   *
+   * @param conf Hadoop configuration
+   * @param awsConf AWS SDK configuration
+   *
+   * @throws IOException if there is an error initializing the configured
+   *                     {@link javax.net.ssl.SSLSocketFactory}
+   */
+  private static void initProtocolSettings(Configuration conf,
+      ClientConfiguration awsConf) throws IOException {
+    boolean secureConnections = conf.getBoolean(SECURE_CONNECTIONS,
+        DEFAULT_SECURE_CONNECTIONS);
+    awsConf.setProtocol(secureConnections ?  Protocol.HTTPS : Protocol.HTTP);
+    if (secureConnections) {
+      NetworkBinding.bindSSLChannelMode(conf, awsConf);
     }
   }
 
@@ -1350,6 +1427,26 @@ public final class S3AUtils {
   }
 
   /**
+   * Convert the data of an iterator of {@link S3AFileStatus} to
+   * an array. Given tombstones are filtered out. If the iterator
+   * does return any item, an empty array is returned.
+   * @param iterator a non-null iterator
+   * @param tombstones possibly empty set of tombstones
+   * @return a possibly-empty array of file status entries
+   * @throws IOException failure
+   */
+  public static S3AFileStatus[] iteratorToStatuses(
+      RemoteIterator<S3AFileStatus> iterator, Set<Path> tombstones)
+      throws IOException {
+    // this will close the span afterwards
+    RemoteIterator<S3AFileStatus> source = filteringRemoteIterator(iterator,
+        st -> !tombstones.contains(st.getPath()));
+    S3AFileStatus[] statuses = RemoteIterators
+        .toArray(source, new S3AFileStatus[0]);
+    return statuses;
+  }
+
+  /**
    * An interface for use in lambda-expressions working with
    * directory tree listings.
    */
@@ -1376,14 +1473,9 @@ public final class S3AUtils {
    * @throws IOException anything in the closure, or iteration logic.
    */
   public static long applyLocatedFiles(
-      RemoteIterator<LocatedFileStatus> iterator,
+      RemoteIterator<? extends LocatedFileStatus> iterator,
       CallOnLocatedFileStatus eval) throws IOException {
-    long count = 0;
-    while (iterator.hasNext()) {
-      count++;
-      eval.call(iterator.next());
-    }
-    return count;
+    return RemoteIterators.foreach(iterator, eval::call);
   }
 
   /**
@@ -1396,7 +1488,7 @@ public final class S3AUtils {
    * @throws IOException anything in the closure, or iteration logic.
    */
   public static <T> List<T> mapLocatedFiles(
-      RemoteIterator<LocatedFileStatus> iterator,
+      RemoteIterator<? extends LocatedFileStatus> iterator,
       LocatedFileStatusMap<T> eval) throws IOException {
     final List<T> results = new ArrayList<>();
     applyLocatedFiles(iterator,
@@ -1476,7 +1568,7 @@ public final class S3AUtils {
   }
 
   /**
-   * Get any SSE key from a configuration/credential provider.
+   * Get any SSE/CSE key from a configuration/credential provider.
    * This operation handles the case where the option has been
    * set in the provider or configuration to the option
    * {@code OLD_S3A_SERVER_SIDE_ENCRYPTION_KEY}.
@@ -1486,7 +1578,7 @@ public final class S3AUtils {
    * @return the encryption key or ""
    * @throws IllegalArgumentException bad arguments.
    */
-  public static String getServerSideEncryptionKey(String bucket,
+  public static String getS3EncryptionKey(String bucket,
       Configuration conf) {
     try {
       return lookupPassword(bucket, conf, SERVER_SIDE_ENCRYPTION_KEY);
@@ -1497,7 +1589,7 @@ public final class S3AUtils {
   }
 
   /**
-   * Get the server-side encryption algorithm.
+   * Get the server-side encryption or client side encryption algorithm.
    * This includes validation of the configuration, checking the state of
    * the encryption key given the chosen algorithm.
    *
@@ -1509,22 +1601,23 @@ public final class S3AUtils {
    */
   public static S3AEncryptionMethods getEncryptionAlgorithm(String bucket,
       Configuration conf) throws IOException {
-    S3AEncryptionMethods sse = S3AEncryptionMethods.getMethod(
+    S3AEncryptionMethods encryptionMethod = S3AEncryptionMethods.getMethod(
         lookupPassword(bucket, conf,
             SERVER_SIDE_ENCRYPTION_ALGORITHM));
-    String sseKey = getServerSideEncryptionKey(bucket, conf);
-    int sseKeyLen = StringUtils.isBlank(sseKey) ? 0 : sseKey.length();
-    String diagnostics = passwordDiagnostics(sseKey, "key");
-    switch (sse) {
+    String encryptionKey = getS3EncryptionKey(bucket, conf);
+    int encryptionKeyLen =
+        StringUtils.isBlank(encryptionKey) ? 0 : encryptionKey.length();
+    String diagnostics = passwordDiagnostics(encryptionKey, "key");
+    switch (encryptionMethod) {
     case SSE_C:
       LOG.debug("Using SSE-C with {}", diagnostics);
-      if (sseKeyLen == 0) {
+      if (encryptionKeyLen == 0) {
         throw new IOException(SSE_C_NO_KEY_ERROR);
       }
       break;
 
     case SSE_S3:
-      if (sseKeyLen != 0) {
+      if (encryptionKeyLen != 0) {
         throw new IOException(SSE_S3_WITH_KEY_ERROR
             + " (" + diagnostics + ")");
       }
@@ -1535,12 +1628,17 @@ public final class S3AUtils {
           diagnostics);
       break;
 
+    case CSE_KMS:
+      LOG.debug("Using CSE-KMS with {}",
+          diagnostics);
+      break;
+
     case NONE:
     default:
       LOG.debug("Data is unencrypted");
       break;
     }
-    return sse;
+    return encryptionMethod;
   }
 
   /**
@@ -1570,26 +1668,17 @@ public final class S3AUtils {
   /**
    * Close the Closeable objects and <b>ignore</b> any Exception or
    * null pointers.
-   * (This is the SLF4J equivalent of that in {@code IOUtils}).
+   * This is obsolete: use
+   * {@link org.apache.hadoop.io.IOUtils#cleanupWithLogger(Logger, Closeable...)}
    * @param log the log to log at debug level. Can be null.
    * @param closeables the objects to close
    */
+  @Deprecated
   public static void closeAll(Logger log,
       Closeable... closeables) {
-    if (log == null) {
-      log = LOG;
-    }
-    for (Closeable c : closeables) {
-      if (c != null) {
-        try {
-          log.debug("Closing {}", c);
-          c.close();
-        } catch (Exception e) {
-          log.debug("Exception in closing {}", c, e);
-        }
-      }
-    }
+    cleanupWithLogger(log, closeables);
   }
+
   /**
    * Close the Closeable objects and <b>ignore</b> any Exception or
    * null pointers.
@@ -1668,6 +1757,21 @@ public final class S3AUtils {
     return conf.get(FS_S3A_BUCKET_PREFIX + bucket + '.' + baseKey);
   }
 
+  /**
+   * Turns a path (relative or otherwise) into an S3 key, adding a trailing
+   * "/" if the path is not the root <i>and</i> does not already have a "/"
+   * at the end.
+   *
+   * @param key s3 key or ""
+   * @return the with a trailing "/", or, if it is the root key, "",
+   */
+  public static String maybeAddTrailingSlash(String key) {
+    if (!key.isEmpty() && !key.endsWith("/")) {
+      return key + '/';
+    } else {
+      return key;
+    }
+  }
 
   /**
    * Path filter which ignores any file which starts with . or _.

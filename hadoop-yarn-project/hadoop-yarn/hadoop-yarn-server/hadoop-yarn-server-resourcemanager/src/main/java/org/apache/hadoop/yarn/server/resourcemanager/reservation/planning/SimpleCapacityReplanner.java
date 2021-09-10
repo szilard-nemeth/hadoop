@@ -23,8 +23,8 @@ import java.util.List;
 import java.util.Set;
 import java.util.TreeSet;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.hadoop.yarn.api.records.ReservationDefinition;
 import org.apache.hadoop.yarn.api.records.Resource;
 import org.apache.hadoop.yarn.server.resourcemanager.reservation.Plan;
@@ -36,7 +36,7 @@ import org.apache.hadoop.yarn.util.UTCClock;
 import org.apache.hadoop.yarn.util.resource.ResourceCalculator;
 import org.apache.hadoop.yarn.util.resource.Resources;
 
-import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
 
 /**
  * This (re)planner scan a period of time from now to a maximum time window (or
@@ -48,8 +48,8 @@ import com.google.common.annotations.VisibleForTesting;
  */
 public class SimpleCapacityReplanner implements Planner {
 
-  private static final Log LOG = LogFactory
-      .getLog(SimpleCapacityReplanner.class);
+  private static final Logger LOG = LoggerFactory
+      .getLogger(SimpleCapacityReplanner.class);
 
   private static final Resource ZERO_RESOURCE = Resource.newInstance(0, 0);
 

@@ -32,6 +32,7 @@ import org.apache.commons.text.StringEscapeUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.CommonConfigurationKeys;
 import org.apache.hadoop.security.UserGroupInformation;
+import org.apache.hadoop.security.authentication.server.PseudoAuthenticationHandler;
 import org.apache.hadoop.security.http.RestCsrfPreventionFilter;
 import org.apache.hadoop.util.StringUtils;
 import org.apache.hadoop.yarn.api.ApplicationBaseProtocol;
@@ -84,7 +85,8 @@ public class AppBlock extends HtmlBlock {
     this.conf = conf;
     // check if UI is unsecured.
     String httpAuth = conf.get(CommonConfigurationKeys.HADOOP_HTTP_AUTHENTICATION_TYPE);
-    this.unsecuredUI = (httpAuth != null) && httpAuth.equals("simple");
+    this.unsecuredUI = (httpAuth != null) && (httpAuth.equals("simple") ||
+         httpAuth.equals(PseudoAuthenticationHandler.class.getName()));
   }
 
   @Override
@@ -174,7 +176,7 @@ public class AppBlock extends HtmlBlock {
         && conf.getBoolean(YarnConfiguration.RM_WEBAPP_UI_ACTIONS_ENABLED,
           YarnConfiguration.DEFAULT_RM_WEBAPP_UI_ACTIONS_ENABLED)
             && !unsecuredUIForSecuredCluster
-            && !isAppInFinalState(app)) {
+            && !Apps.isApplicationFinalState(app.getAppState())) {
       // Application Kill
       html.div()
         .button()
@@ -251,11 +253,9 @@ public class AppBlock extends HtmlBlock {
                 || app.getTrackingUrl().equals(UNAVAILABLE) ? null : root_url(app
                 .getTrackingUrl()),
             app.getTrackingUrl() == null
-                || app.getTrackingUrl().equals(UNAVAILABLE) ? "Unassigned" : app
-                .getAppState() == YarnApplicationState.FINISHED
-                || app.getAppState() == YarnApplicationState.FAILED
-                || app.getAppState() == YarnApplicationState.KILLED ? "History"
-                : "ApplicationMaster");
+                || app.getTrackingUrl().equals(UNAVAILABLE) ? "Unassigned" :
+                Apps.isApplicationFinalState(app.getAppState()) ?
+                    "History" : "ApplicationMaster");
     if (webUiType != null
         && webUiType.equals(YarnWebParams.RM_WEB_UI)) {
       LogAggregationStatus status = getLogAggregationStatus();
@@ -445,11 +445,5 @@ public class AppBlock extends HtmlBlock {
       ret += "' : 'null' },";
     }
     return ret;
-  }
-
-  private boolean isAppInFinalState(AppInfo app) {
-    return app.getAppState() == YarnApplicationState.FINISHED
-        || app.getAppState() == YarnApplicationState.FAILED
-        || app.getAppState() == YarnApplicationState.KILLED;
   }
 }

@@ -18,8 +18,8 @@
 
 package org.apache.hadoop.yarn.service.client;
 
-import com.google.common.collect.Lists;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.util.Lists;
 import org.apache.hadoop.yarn.api.protocolrecords.GetApplicationsRequest;
 import org.apache.hadoop.yarn.api.records.ApplicationAttemptId;
 import org.apache.hadoop.yarn.api.records.ApplicationAttemptReport;
@@ -75,6 +75,29 @@ public class TestServiceClient {
   @Rule
   public ServiceTestUtils.ServiceFSWatcher rule =
       new ServiceTestUtils.ServiceFSWatcher();
+
+  @Test
+  public void testAMEnvCustomClasspath() throws Exception {
+    Service service = createService();
+    service.getComponents().forEach(comp ->
+            comp.setRestartPolicy(Component.RestartPolicyEnum.NEVER));
+    ServiceClient client = MockServiceClient.create(rule, service, true);
+    //saving the original value of the param, for restoration purposes
+    String oldParam = client.getConfig().get("yarn.service.classpath", "");
+    String originalPath = client.addAMEnv().get("CLASSPATH");
+
+    client.getConfig().set("yarn.service.classpath", "{{VAR_1}},{{VAR_2}}");
+    String newPath = client.addAMEnv().get("CLASSPATH");
+
+    Assert.assertEquals(originalPath + "<CPS>{{VAR_1}}<CPS>{{VAR_2}}", newPath);
+    //restoring the original value for service classpath
+    client.getConfig().set("yarn.service.classpath", oldParam);
+
+    newPath = client.addAMEnv().get("CLASSPATH");
+    Assert.assertEquals(originalPath, newPath);
+
+    client.stop();
+  }
 
   @Test
   public void testUpgradeDisabledByDefault() throws Exception {

@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.nio.charset.Charset;
 import java.util.List;
 
+import org.junit.Assume;
 import org.junit.Test;
 
 import org.apache.commons.io.IOUtils;
@@ -34,12 +35,14 @@ import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.s3a.S3AFileSystem;
 import org.apache.hadoop.fs.s3a.S3ATestUtils;
 import org.apache.hadoop.fs.s3a.Statistic;
-import org.apache.hadoop.fs.s3a.commit.Duration;
+import org.apache.hadoop.fs.s3a.impl.ChangeDetectionPolicy;
+import org.apache.hadoop.fs.s3a.impl.ChangeDetectionPolicy.Source;
 import org.apache.hadoop.fs.s3a.s3guard.S3GuardTool;
 import org.apache.hadoop.util.ExitUtil;
+import org.apache.hadoop.util.OperationDuration;
 import org.apache.hadoop.util.ToolRunner;
 
-import static com.google.common.base.Preconditions.checkNotNull;
+import static org.apache.hadoop.thirdparty.com.google.common.base.Preconditions.checkNotNull;
 import static org.apache.hadoop.fs.s3a.S3ATestUtils.disableFilesystemCaching;
 import static org.apache.hadoop.fs.s3a.s3guard.S3GuardToolTestHelper.exec;
 import static org.apache.hadoop.fs.s3a.select.ITestS3SelectLandsat.SELECT_NOTHING;
@@ -80,6 +83,11 @@ public class ITestS3SelectCLI extends AbstractS3SelectTest {
     selectConf = new Configuration(getConfiguration());
     localFile = getTempFilename();
     landsatSrc = getLandsatGZ().toString();
+    ChangeDetectionPolicy changeDetectionPolicy =
+        getLandsatFS().getChangeDetectionPolicy();
+    Assume.assumeFalse("the standard landsat bucket doesn't have versioning",
+        changeDetectionPolicy.getSource() == Source.VersionId
+            && changeDetectionPolicy.isRequireVersion());
   }
 
   @Override
@@ -165,7 +173,7 @@ public class ITestS3SelectCLI extends AbstractS3SelectTest {
     LOG.info("Result from select:\n{}", lines.get(0));
     assertEquals(lineCount, lines.size());
     selectCount.assertDiffEquals("select count", 1);
-    Duration duration = selectTool.getSelectDuration();
+    OperationDuration duration = selectTool.getSelectDuration();
     assertTrue("Select duration was not measured",
         duration.value() > 0);
   }

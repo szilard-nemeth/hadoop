@@ -21,7 +21,11 @@ import com.codahale.metrics.MetricRegistry;
 import java.util.HashMap;
 import org.apache.commons.io.FileUtils;
 import org.apache.hadoop.yarn.api.records.ApplicationId;
+import org.apache.hadoop.yarn.api.records.ExecutionType;
+import org.apache.hadoop.yarn.api.records.NodeId;
 import org.apache.hadoop.yarn.api.records.ReservationId;
+import org.apache.hadoop.yarn.api.records.Resource;
+import org.apache.hadoop.yarn.api.records.ResourceRequest;
 import org.apache.hadoop.yarn.client.cli.RMAdminCLI;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.apache.hadoop.yarn.exceptions.YarnException;
@@ -29,14 +33,18 @@ import org.apache.hadoop.yarn.server.resourcemanager.ResourceManager;
 import org.apache.hadoop.yarn.server.resourcemanager.rmapp.RMApp;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.capacity.CapacityScheduler;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.fair.FairScheduler;
+import org.apache.hadoop.yarn.sls.SLSRunner;
 import org.apache.hadoop.yarn.sls.conf.SLSConfiguration;
+import org.apache.hadoop.yarn.sls.nodemanager.NMSimulator;
 import org.apache.hadoop.yarn.sls.scheduler.*;
+import org.apache.hadoop.yarn.util.resource.Resources;
 import org.junit.After;
 import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
+import org.mockito.Mockito;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -46,7 +54,10 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentMap;
+
+import static org.mockito.Mockito.when;
 
 @RunWith(Parameterized.class)
 public class TestAMSimulator {
@@ -187,6 +198,124 @@ public class TestAMSimulator {
       Assert.assertNotNull(rmApp);
       Assert.assertEquals("label1", rmApp.getAmNodeLabelExpression());
     }
+  }
+
+  @Test
+  public void testPackageRequests() {
+    MockAMSimulator app = new MockAMSimulator();
+    List<ContainerSimulator> containerSimulators = new ArrayList<>();
+    Resource resource = Resources.createResource(1024);
+    int priority = 1;
+    ExecutionType execType = ExecutionType.GUARANTEED;
+    String type = "map";
+
+    ContainerSimulator s1 = new ContainerSimulator(resource, 100,
+        "/default-rack/h1", priority, type, execType);
+    ContainerSimulator s2 = new ContainerSimulator(resource, 100,
+        "/default-rack/h1", priority, type, execType);
+    ContainerSimulator s3 = new ContainerSimulator(resource, 100,
+        "/default-rack/h2", priority, type, execType);
+
+    containerSimulators.add(s1);
+    containerSimulators.add(s2);
+    containerSimulators.add(s3);
+
+    List<ResourceRequest> res = app.packageRequests(containerSimulators,
+        priority);
+
+    // total 4 resource requests: any -> 1, rack -> 1, node -> 2
+    // All resource requests for any would be packaged into 1.
+    // All resource requests for racks would be packaged into 1 as all of them
+    // are for same rack.
+    // All resource requests for nodes would be packaged into 2 as there are
+    // two different nodes.
+    Assert.assertEquals(4, res.size());
+    int anyRequestCount = 0;
+    int rackRequestCount = 0;
+    int nodeRequestCount = 0;
+
+    for (ResourceRequest request : res) {
+      String resourceName = request.getResourceName();
+      if (resourceName.equals("*")) {
+        anyRequestCount++;
+      } else if (resourceName.equals("/default-rack")) {
+        rackRequestCount++;
+      } else {
+        nodeRequestCount++;
+      }
+    }
+
+    Assert.assertEquals(1, anyRequestCount);
+    Assert.assertEquals(1, rackRequestCount);
+    Assert.assertEquals(2, nodeRequestCount);
+
+    containerSimulators.clear();
+    s1 = new ContainerSimulator(resource, 100,
+        "/default-rack/h1", priority, type, execType, 1, 0);
+    s2 = new ContainerSimulator(resource, 100,
+        "/default-rack/h1", priority, type, execType, 2, 0);
+    s3 = new ContainerSimulator(resource, 100,
+        "/default-rack/h2", priority, type, execType, 1, 0);
+
+    containerSimulators.add(s1);
+    containerSimulators.add(s2);
+    containerSimulators.add(s3);
+
+    res = app.packageRequests(containerSimulators, priority);
+
+    // total 7 resource requests: any -> 2, rack -> 2, node -> 3
+    // All resource requests for any would be packaged into 2 as there are
+    // two different allocation id.
+    // All resource requests for racks would be packaged into 2 as all of them
+    // are for same rack but for two different allocation id.
+    // All resource requests for nodes would be packaged into 3 as either node
+    // or allocation id is different for each request.
+    Assert.assertEquals(7, res.size());
+
+    anyRequestCount = 0;
+    rackRequestCount = 0;
+    nodeRequestCount = 0;
+
+    for (ResourceRequest request : res) {
+      String resourceName = request.getResourceName();
+      long allocationId = request.getAllocationRequestId();
+      // allocation id should be either 1 or 2
+      Assert.assertTrue(allocationId == 1 || allocationId == 2);
+      if (resourceName.equals("*")) {
+        anyRequestCount++;
+      } else if (resourceName.equals("/default-rack")) {
+        rackRequestCount++;
+      } else {
+        nodeRequestCount++;
+      }
+    }
+
+    Assert.assertEquals(2, anyRequestCount);
+    Assert.assertEquals(2, rackRequestCount);
+    Assert.assertEquals(3, nodeRequestCount);
+  }
+
+  @Test
+  public void testAMSimulatorRanNodesCleared() throws Exception {
+    NMSimulator nm = new NMSimulator();
+    nm.init("/rack1/testNode1", Resources.createResource(1024 * 10, 10), 0, 1000,
+        rm, -1f);
+
+    Map<NodeId, NMSimulator> nmMap = new HashMap<>();
+    nmMap.put(nm.getNode().getNodeID(), nm);
+
+    MockAMSimulator app = new MockAMSimulator();
+    app.appId = ApplicationId.newInstance(0l, 1);
+    SLSRunner slsRunner = Mockito.mock(SLSRunner.class);
+    app.se = slsRunner;
+    when(slsRunner.getNmMap()).thenReturn(nmMap);
+    app.getRanNodes().add(nm.getNode().getNodeID());
+    nm.getNode().getRunningApps().add(app.appId);
+    Assert.assertTrue(nm.getNode().getRunningApps().contains(app.appId));
+
+    app.lastStep();
+    Assert.assertFalse(nm.getNode().getRunningApps().contains(app.appId));
+    Assert.assertTrue(nm.getNode().getRunningApps().isEmpty());
   }
 
   @After

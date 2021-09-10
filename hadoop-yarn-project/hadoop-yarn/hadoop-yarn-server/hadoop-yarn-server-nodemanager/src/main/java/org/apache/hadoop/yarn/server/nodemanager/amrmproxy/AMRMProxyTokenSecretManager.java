@@ -43,7 +43,7 @@ import org.apache.hadoop.yarn.server.nodemanager.recovery.NMStateStoreService;
 import org.apache.hadoop.yarn.server.nodemanager.recovery.NMStateStoreService.RecoveredAMRMProxyState;
 import org.apache.hadoop.yarn.server.security.MasterKeyData;
 
-import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
 
 /**
  * This secret manager instance is used by the AMRMProxyService to generate and
@@ -248,10 +248,7 @@ public class AMRMProxyTokenSecretManager extends
     try {
       ApplicationAttemptId applicationAttemptId =
           identifier.getApplicationAttemptId();
-      if (LOG.isDebugEnabled()) {
-        LOG.debug("Trying to retrieve password for "
-            + applicationAttemptId);
-      }
+      LOG.debug("Trying to retrieve password for {}", applicationAttemptId);
       if (!appAttemptSet.contains(applicationAttemptId)) {
         throw new InvalidToken(applicationAttemptId
             + " not found in AMRMProxyTokenSecretManager.");

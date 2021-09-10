@@ -38,6 +38,8 @@ import org.apache.hadoop.util.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static org.apache.hadoop.util.functional.RemoteIterators.cleanupRemoteIterator;
+
 /**
  * An abstract class for the execution of a file system command
  */
@@ -361,6 +363,7 @@ abstract public class Command extends Configured {
         }
       }
     }
+    cleanupRemoteIterator(itemsIterator);
   }
 
   private void processPathInternal(PathData item) throws IOException {
@@ -458,7 +461,7 @@ abstract public class Command extends Configured {
     if (e instanceof InterruptedIOException) {
       throw new CommandInterruptException();
     }
-    
+    LOG.debug("{} failure", getName(), e);
     String errorMessage = e.getLocalizedMessage();
     if (errorMessage == null) {
       // this is an unexpected condition, so dump the whole exception since

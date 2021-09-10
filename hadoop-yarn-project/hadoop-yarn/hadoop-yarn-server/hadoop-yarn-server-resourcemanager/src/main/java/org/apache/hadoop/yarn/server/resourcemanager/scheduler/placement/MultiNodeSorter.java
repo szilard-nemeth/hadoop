@@ -29,8 +29,8 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.service.AbstractService;
 import org.apache.hadoop.util.ReflectionUtils;
@@ -41,7 +41,7 @@ import org.apache.hadoop.yarn.server.resourcemanager.nodelabels.RMNodeLabelsMana
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.AbstractYarnScheduler;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.SchedulerNode;
 
-import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
 
 /**
  * Common node sorting class which will do sorting based on policy spec.
@@ -50,7 +50,8 @@ import com.google.common.annotations.VisibleForTesting;
 public class MultiNodeSorter<N extends SchedulerNode> extends AbstractService {
 
   private MultiNodeLookupPolicy<N> multiNodePolicy;
-  private static final Log LOG = LogFactory.getLog(MultiNodeSorter.class);
+  private static final Logger LOG =
+      LoggerFactory.getLogger(MultiNodeSorter.class);
 
   // ScheduledExecutorService which schedules the PreemptionChecker to run
   // periodically.
@@ -134,7 +135,7 @@ public class MultiNodeSorter<N extends SchedulerNode> extends AbstractService {
       Map<NodeId, SchedulerNode> nodesByPartition = new HashMap<>();
       List<SchedulerNode> nodes = ((AbstractYarnScheduler) rmContext
           .getScheduler()).getNodeTracker().getNodesPerPartition(label);
-      if (nodes != null && !nodes.isEmpty()) {
+      if (nodes != null) {
         nodes.forEach(n -> nodesByPartition.put(n.getNodeID(), n));
         multiNodePolicy.addAndRefreshNodesSet(
             (Collection<N>) nodesByPartition.values(), label);

@@ -27,8 +27,8 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.hadoop.classification.InterfaceAudience.Private;
 import org.apache.hadoop.classification.InterfaceStability.Unstable;
 import org.apache.hadoop.yarn.api.records.ApplicationAttemptId;
@@ -89,7 +89,7 @@ import org.apache.hadoop.yarn.util.resource.DefaultResourceCalculator;
 import org.apache.hadoop.yarn.util.resource.ResourceCalculator;
 import org.apache.hadoop.yarn.util.resource.Resources;
 
-import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
 
 /**
  * Represents an application attempt from the viewpoint of the FIFO or Capacity
@@ -98,7 +98,8 @@ import com.google.common.annotations.VisibleForTesting;
 @Private
 @Unstable
 public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
-  private static final Log LOG = LogFactory.getLog(FiCaSchedulerApp.class);
+  private static final Logger LOG =
+      LoggerFactory.getLogger(FiCaSchedulerApp.class);
 
   private final Set<ContainerId> containersToPreempt =
     new HashSet<ContainerId>();
@@ -110,6 +111,8 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
   private ResourceScheduler scheduler;
 
   private AbstractContainerAllocator containerAllocator;
+
+  private boolean runnable;
 
   /**
    * to hold the message if its app doesn't not get container from a node
@@ -138,6 +141,7 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
       RMContext rmContext, Priority appPriority, boolean isAttemptRecovering,
       ActivitiesManager activitiesManager) {
     super(applicationAttemptId, user, queue, abstractUsersManager, rmContext);
+    this.runnable = true;
 
     RMApp rmApp = rmContext.getRMApps().get(getApplicationId());
 
@@ -200,8 +204,8 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
   public boolean containerCompleted(RMContainer rmContainer,
       ContainerStatus containerStatus, RMContainerEventType event,
       String partition) {
+    writeLock.lock();
     try {
-      writeLock.lock();
       ContainerId containerId = rmContainer.getContainerId();
 
       // Remove from the list of containers
@@ -245,8 +249,8 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
 
   public RMContainer allocate(FiCaSchedulerNode node,
       SchedulerRequestKey schedulerKey, Container container) {
+    readLock.lock();
     try {
-      readLock.lock();
 
       if (isStopped) {
         return null;
@@ -272,7 +276,12 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
           this.getApplicationAttemptId(), node.getNodeID(),
           appSchedulingInfo.getUser(), this.rmContext,
           ps.getPrimaryRequestedNodePartition());
-      ((RMContainerImpl) rmContainer).setQueueName(this.getQueueName());
+
+      String qn = this.getQueueName();
+      if (this.scheduler instanceof CapacityScheduler) {
+        qn = ((CapacityScheduler)this.scheduler).normalizeQueueName(qn);
+      }
+      ((RMContainerImpl) rmContainer).setQueueName(qn);
 
       // FIXME, should set when confirmed
       updateAMContainerDiagnostics(AMState.ASSIGNED, null);
@@ -296,10 +305,8 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
     for (SchedulerContainer<FiCaSchedulerApp, FiCaSchedulerNode> c : request
         .getContainersToRelease()) {
       if (rmContainerInFinalState(c.getRmContainer())) {
-        if (LOG.isDebugEnabled()) {
-          LOG.debug("To-release container=" + c.getRmContainer()
-              + " is in final state");
-        }
+        LOG.debug("To-release container={} is in final state",
+            c.getRmContainer());
         return true;
       }
     }
@@ -309,10 +316,8 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
       for (SchedulerContainer<FiCaSchedulerApp, FiCaSchedulerNode> r : c
           .getToRelease()) {
         if (rmContainerInFinalState(r.getRmContainer())) {
-          if (LOG.isDebugEnabled()) {
-            LOG.debug("To-release container=" + r.getRmContainer()
-                + ", for to a new allocated container, is in final state");
-          }
+          LOG.debug("To-release container={}, for to a new allocated"
+              + " container, is in final state", r.getRmContainer());
           return true;
         }
       }
@@ -320,11 +325,8 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
       if (null != c.getAllocateFromReservedContainer()) {
         if (rmContainerInFinalState(
             c.getAllocateFromReservedContainer().getRmContainer())) {
-          if (LOG.isDebugEnabled()) {
-            LOG.debug("Allocate from reserved container" + c
-                .getAllocateFromReservedContainer().getRmContainer()
-                + " is in final state");
-          }
+          LOG.debug("Allocate from reserved container {} is in final state",
+              c.getAllocateFromReservedContainer().getRmContainer());
           return true;
         }
       }
@@ -335,10 +337,8 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
       for (SchedulerContainer<FiCaSchedulerApp, FiCaSchedulerNode> r : c
           .getToRelease()) {
         if (rmContainerInFinalState(r.getRmContainer())) {
-          if (LOG.isDebugEnabled()) {
-            LOG.debug("To-release container=" + r.getRmContainer()
-                + ", for a reserved container, is in final state");
-          }
+          LOG.debug("To-release container={}, for a reserved container,"
+              + " is in final state", r.getRmContainer());
           return true;
         }
       }
@@ -363,10 +363,7 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
           allocation.getAllocateFromReservedContainer().getRmContainer();
 
       if (fromReservedContainer != reservedContainerOnNode) {
-        if (LOG.isDebugEnabled()) {
-          LOG.debug(
-              "Try to allocate from a non-existed reserved container");
-        }
+        LOG.debug("Try to allocate from a non-existed reserved container");
         return false;
       }
     }
@@ -437,8 +434,8 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
     ContainerRequest containerRequest = null;
     boolean reReservation = false;
 
+    readLock.lock();
     try {
-      readLock.lock();
 
       // First make sure no container in release list in final state
       if (anyContainerInFinalState(request)) {
@@ -560,8 +557,8 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
       FiCaSchedulerNode> request, boolean updatePending) {
     boolean reReservation = false;
 
+    writeLock.lock();
     try {
-      writeLock.lock();
 
       // If we allocated something
       if (request.anythingAllocatedOrReserved()) {
@@ -615,7 +612,7 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
                 allocation.getAllocationLocalityType(),
                 schedulerContainer.getSchedulerNode(),
                 schedulerContainer.getSchedulerRequestKey(),
-                schedulerContainer.getRmContainer().getContainer());
+                  schedulerContainer.getRmContainer());
             ((RMContainerImpl) rmContainer).setContainerRequest(
                 containerRequest);
 
@@ -629,7 +626,7 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
             AppSchedulingInfo.updateMetrics(getApplicationId(),
                 allocation.getAllocationLocalityType(),
                 schedulerContainer.getSchedulerNode(),
-                schedulerContainer.getRmContainer().getContainer(), getUser(),
+                schedulerContainer.getRmContainer(), getUser(),
                 getQueue());
           }
 
@@ -692,8 +689,8 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
 
   public boolean unreserve(SchedulerRequestKey schedulerKey,
       FiCaSchedulerNode node, RMContainer rmContainer) {
+    writeLock.lock();
     try {
-      writeLock.lock();
       // Done with the reservation?
       if (internalUnreserve(node, schedulerKey)) {
         node.unreserveResource(this);
@@ -739,7 +736,8 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
             + " on node " + node + ", currently has "
             + reservedContainers.size()
             + " at priority " + schedulerKey.getPriority()
-            + "; currentReservation " + this.attemptResourceUsage.getReserved()
+            + "; currentReservation "
+            + this.attemptResourceUsage.getReserved(node.getPartition())
             + " on node-label=" + node.getPartition());
         return true;
       }
@@ -748,8 +746,8 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
   }
 
   public Map<String, Resource> getTotalPendingRequestsPerPartition() {
+    readLock.lock();
     try {
-      readLock.lock();
 
       Map<String, Resource> ret = new HashMap<>();
       for (SchedulerRequestKey schedulerKey : appSchedulingInfo
@@ -780,8 +778,8 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
   }
 
   public void markContainerForPreemption(ContainerId cont) {
+    writeLock.lock();
     try {
-      writeLock.lock();
       // ignore already completed containers
       if (liveContainers.containsKey(cont)) {
         containersToPreempt.add(cont);
@@ -803,8 +801,8 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
    */
   public Allocation getAllocation(ResourceCalculator resourceCalculator,
       Resource clusterResource, Resource minimumAllocation) {
+    writeLock.lock();
     try {
-      writeLock.lock();
       Set<ContainerId> currentContPreemption = Collections.unmodifiableSet(
           new HashSet<ContainerId>(containersToPreempt));
       containersToPreempt.clear();
@@ -832,7 +830,7 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
           currentContPreemption, Collections.singletonList(rr), updatedNMTokens,
           newlyIncreasedContainers, newlyDecreasedContainers,
           newlyPromotedContainers, newlyDemotedContainers,
-          previousAttemptContainers);
+          previousAttemptContainers, appSchedulingInfo.getRejectedRequest());
     } finally {
       writeLock.unlock();
     }
@@ -857,12 +855,9 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
         // resources, otherwise could affect capacity limits
         if (Resources.fitsIn(resourceCalculator, resourceNeedUnreserve,
             reservedResource)) {
-          if (LOG.isDebugEnabled()) {
-            LOG.debug(
-                "unreserving node with reservation size: " + reservedResource
-                    + " in order to allocate container with size: "
-                    + resourceNeedUnreserve);
-          }
+          LOG.debug("unreserving node with reservation size: {} in order to"
+              + " allocate container with size: {}", reservedResource,
+              resourceNeedUnreserve);
           return nodeId;
         }
       }
@@ -872,8 +867,8 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
 
   public void setHeadroomProvider(
     CapacityHeadroomProvider headroomProvider) {
+    writeLock.lock();
     try {
-      writeLock.lock();
       this.headroomProvider = headroomProvider;
     } finally {
       writeLock.unlock();
@@ -882,8 +877,8 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
 
   @Override
   public Resource getHeadroom() {
+    readLock.lock();
     try {
-      readLock.lock();
       if (headroomProvider != null) {
         return headroomProvider.getHeadroom();
       }
@@ -897,8 +892,8 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
   @Override
   public void transferStateFromPreviousAttempt(
       SchedulerApplicationAttempt appAttempt) {
+    writeLock.lock();
     try {
-      writeLock.lock();
       super.transferStateFromPreviousAttempt(appAttempt);
       this.headroomProvider = ((FiCaSchedulerApp) appAttempt).headroomProvider;
     } finally {
@@ -925,16 +920,14 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
   @VisibleForTesting
   public RMContainer findNodeToUnreserve(FiCaSchedulerNode node,
       SchedulerRequestKey schedulerKey, Resource minimumUnreservedResource) {
+    readLock.lock();
     try {
-      readLock.lock();
       // need to unreserve some other container first
       NodeId idToUnreserve = getNodeIdToUnreserve(schedulerKey,
           minimumUnreservedResource, rc);
       if (idToUnreserve == null) {
-        if (LOG.isDebugEnabled()) {
-          LOG.debug("checked to see if could unreserve for app but nothing "
-              + "reserved that matches for this app");
-        }
+        LOG.debug("checked to see if could unreserve for app but nothing "
+            + "reserved that matches for this app");
         return null;
       }
       FiCaSchedulerNode nodeToUnreserve =
@@ -999,25 +992,24 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
   protected void getPendingAppDiagnosticMessage(
       StringBuilder diagnosticMessage) {
     LeafQueue queue = getCSLeafQueue();
-    diagnosticMessage.append(" Details : AM Partition = ");
-    diagnosticMessage.append(appAMNodePartitionName.isEmpty()
-        ? NodeLabel.DEFAULT_NODE_LABEL_PARTITION : appAMNodePartitionName);
-    diagnosticMessage.append("; ");
-    diagnosticMessage.append("AM Resource Request = ");
-    diagnosticMessage.append(getAMResource(appAMNodePartitionName));
-    diagnosticMessage.append("; ");
-    diagnosticMessage.append("Queue Resource Limit for AM = ");
-    diagnosticMessage
-        .append(queue.getAMResourceLimitPerPartition(appAMNodePartitionName));
-    diagnosticMessage.append("; ");
-    diagnosticMessage.append("User AM Resource Limit of the queue = ");
-    diagnosticMessage.append(queue.getUserAMResourceLimitPerPartition(
-        appAMNodePartitionName, getUser()));
-    diagnosticMessage.append("; ");
-    diagnosticMessage.append("Queue AM Resource Usage = ");
-    diagnosticMessage.append(
-        queue.getQueueResourceUsage().getAMUsed(appAMNodePartitionName));
-    diagnosticMessage.append("; ");
+    diagnosticMessage.append(" Details : AM Partition = ")
+        .append(appAMNodePartitionName.isEmpty()
+        ? NodeLabel.DEFAULT_NODE_LABEL_PARTITION : appAMNodePartitionName)
+        .append("; ")
+        .append("AM Resource Request = ")
+        .append(getAMResource(appAMNodePartitionName))
+        .append("; ")
+        .append("Queue Resource Limit for AM = ")
+        .append(queue.getAMResourceLimitPerPartition(appAMNodePartitionName))
+        .append("; ")
+        .append("User AM Resource Limit of the queue = ")
+        .append(queue.getUserAMResourceLimitPerPartition(
+            appAMNodePartitionName, getUser()))
+        .append("; ")
+        .append("Queue AM Resource Usage = ")
+        .append(
+            queue.getQueueResourceUsage().getAMUsed(appAMNodePartitionName))
+        .append("; ");
   }
 
   protected void getActivedAppDiagnosticMessage(
@@ -1025,39 +1017,39 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
     LeafQueue queue = getCSLeafQueue();
     QueueCapacities queueCapacities = queue.getQueueCapacities();
     QueueResourceQuotas queueResourceQuotas = queue.getQueueResourceQuotas();
-    diagnosticMessage.append(" Details : AM Partition = ");
-    diagnosticMessage.append(appAMNodePartitionName.isEmpty()
-        ? NodeLabel.DEFAULT_NODE_LABEL_PARTITION : appAMNodePartitionName);
-    diagnosticMessage.append(" ; ");
-    diagnosticMessage.append("Partition Resource = ");
-    diagnosticMessage.append(rmContext.getNodeLabelManager()
-        .getResourceByLabel(appAMNodePartitionName, Resources.none()));
-    diagnosticMessage.append(" ; ");
-    diagnosticMessage.append("Queue's Absolute capacity = ");
-    diagnosticMessage.append(
-        queueCapacities.getAbsoluteCapacity(appAMNodePartitionName) * 100);
-    diagnosticMessage.append(" % ; ");
-    diagnosticMessage.append("Queue's Absolute used capacity = ");
-    diagnosticMessage.append(
-        queueCapacities.getAbsoluteUsedCapacity(appAMNodePartitionName) * 100);
-    diagnosticMessage.append(" % ; ");
-    diagnosticMessage.append("Queue's Absolute max capacity = ");
-    diagnosticMessage.append(
-        queueCapacities.getAbsoluteMaximumCapacity(appAMNodePartitionName)
-            * 100);
-    diagnosticMessage.append(" % ; ");
-    diagnosticMessage.append("Queue's capacity (absolute resource) = ");
-    diagnosticMessage.append(
-        queueResourceQuotas.getEffectiveMinResource(appAMNodePartitionName));
-    diagnosticMessage.append(" ; ");
-    diagnosticMessage.append("Queue's used capacity (absolute resource) = ");
-    diagnosticMessage
-        .append(queue.getQueueResourceUsage().getUsed(appAMNodePartitionName));
-    diagnosticMessage.append(" ; ");
-    diagnosticMessage.append("Queue's max capacity (absolute resource) = ");
-    diagnosticMessage.append(
-        queueResourceQuotas.getEffectiveMaxResource(appAMNodePartitionName));
-    diagnosticMessage.append(" ; ");
+    diagnosticMessage.append(" Details : AM Partition = ")
+        .append(appAMNodePartitionName.isEmpty()
+            ? NodeLabel.DEFAULT_NODE_LABEL_PARTITION : appAMNodePartitionName)
+        .append(" ; ")
+        .append("Partition Resource = ")
+        .append(rmContext.getNodeLabelManager()
+            .getResourceByLabel(appAMNodePartitionName, Resources.none()))
+        .append(" ; ")
+        .append("Queue's Absolute capacity = ")
+        .append(
+            queueCapacities.getAbsoluteCapacity(appAMNodePartitionName) * 100)
+        .append(" % ; ")
+        .append("Queue's Absolute used capacity = ")
+        .append(
+            queueCapacities.getAbsoluteUsedCapacity(appAMNodePartitionName)
+                * 100)
+        .append(" % ; ")
+        .append("Queue's Absolute max capacity = ")
+        .append(
+            queueCapacities.getAbsoluteMaximumCapacity(appAMNodePartitionName)
+                * 100)
+        .append(" % ; ")
+        .append("Queue's capacity (absolute resource) = ")
+        .append(
+            queueResourceQuotas.getEffectiveMinResource(appAMNodePartitionName))
+        .append(" ; ")
+        .append("Queue's used capacity (absolute resource) = ")
+        .append(queue.getQueueResourceUsage().getUsed(appAMNodePartitionName))
+        .append(" ; ")
+        .append("Queue's max capacity (absolute resource) = ")
+        .append(
+            queueResourceQuotas.getEffectiveMaxResource(appAMNodePartitionName))
+        .append(" ; ");
   }
 
   /**
@@ -1082,15 +1074,15 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
         appSkipNodeDiagnostics = null;
       }
       diagnosticMessageBldr.append(
-          CSAMContainerLaunchDiagnosticsConstants.LAST_NODE_PROCESSED_MSG);
-      diagnosticMessageBldr.append(node.getNodeID());
-      diagnosticMessageBldr.append(" ( Partition : ");
-      diagnosticMessageBldr.append(node.getLabels());
-      diagnosticMessageBldr.append(", Total resource : ");
-      diagnosticMessageBldr.append(node.getTotalResource());
-      diagnosticMessageBldr.append(", Available resource : ");
-      diagnosticMessageBldr.append(node.getUnallocatedResource());
-      diagnosticMessageBldr.append(" ).");
+          CSAMContainerLaunchDiagnosticsConstants.LAST_NODE_PROCESSED_MSG)
+          .append(node.getNodeID())
+          .append(" ( Partition : ")
+          .append(node.getLabels())
+          .append(", Total resource : ")
+          .append(node.getTotalResource())
+          .append(", Available resource : ")
+          .append(node.getUnallocatedResource())
+          .append(" ).");
       updateAMContainerDiagnostics(AMState.ACTIVATED, diagnosticMessageBldr.toString());
     }
   }
@@ -1108,11 +1100,11 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
    */
   @Override
   public ApplicationResourceUsageReport getResourceUsageReport() {
+    writeLock.lock();
     try {
       // Use write lock here because
       // SchedulerApplicationAttempt#getResourceUsageReport updated fields
       // TODO: improve this
-      writeLock.lock();
       ApplicationResourceUsageReport report = super.getResourceUsageReport();
       Resource cluster = rmContext.getScheduler().getClusterResource();
       Resource totalPartitionRes =
@@ -1121,7 +1113,7 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
       ResourceCalculator calc =
           rmContext.getScheduler().getResourceCalculator();
       float queueUsagePerc = 0.0f;
-      if (!calc.isInvalidDivisor(totalPartitionRes)) {
+      if (!calc.isAllInvalidDivisor(totalPartitionRes)) {
         Resource effCap = ((AbstractCSQueue) getQueue())
             .getEffectiveCapacity(getAppAMNodePartitionName());
         if (!effCap.equals(Resources.none())) {
@@ -1175,13 +1167,11 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
    */
   public boolean moveReservation(RMContainer reservedContainer,
       FiCaSchedulerNode sourceNode, FiCaSchedulerNode targetNode) {
+    writeLock.lock();
     try {
-      writeLock.lock();
       if (!sourceNode.getPartition().equals(targetNode.getPartition())) {
-        if (LOG.isDebugEnabled()) {
-          LOG.debug(
-              "Failed to move reservation, two nodes are in different partition");
-        }
+        LOG.debug("Failed to move reservation, two nodes are in"
+            + " different partition");
         return false;
       }
 
@@ -1189,17 +1179,13 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
       Map<NodeId, RMContainer> map = reservedContainers.get(
           reservedContainer.getReservedSchedulerKey());
       if (null == map) {
-        if (LOG.isDebugEnabled()) {
-          LOG.debug("Cannot find reserved container map.");
-        }
+        LOG.debug("Cannot find reserved container map.");
         return false;
       }
 
       // Check if reserved container changed
       if (sourceNode.getReservedContainer() != reservedContainer) {
-        if (LOG.isDebugEnabled()) {
-          LOG.debug("To-be-moved container already updated.");
-        }
+        LOG.debug("To-be-moved container already updated.");
         return false;
       }
 
@@ -1207,18 +1193,14 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
       // reservation happens transactional
       synchronized (targetNode){
         if (targetNode.getReservedContainer() != null) {
-          if (LOG.isDebugEnabled()) {
-            LOG.debug("Target node is already occupied before moving");
-          }
+          LOG.debug("Target node is already occupied before moving");
         }
 
         try {
           targetNode.reserveResource(this,
               reservedContainer.getReservedSchedulerKey(), reservedContainer);
         } catch (IllegalStateException e) {
-          if (LOG.isDebugEnabled()) {
-            LOG.debug("Reserve on target node failed, e=", e);
-          }
+          LOG.debug("Reserve on target node failed", e);
           return false;
         }
 
@@ -1239,6 +1221,24 @@ public class FiCaSchedulerApp extends SchedulerApplicationAttempt {
       }
     } finally {
       writeLock.unlock();
+    }
+  }
+
+  public void setRunnable(boolean runnable) {
+    writeLock.lock();
+    try {
+      this.runnable = runnable;
+    } finally {
+      writeLock.unlock();
+    }
+  }
+
+  public boolean isRunnable() {
+    readLock.lock();
+    try {
+      return runnable;
+    } finally {
+      readLock.unlock();
     }
   }
 }

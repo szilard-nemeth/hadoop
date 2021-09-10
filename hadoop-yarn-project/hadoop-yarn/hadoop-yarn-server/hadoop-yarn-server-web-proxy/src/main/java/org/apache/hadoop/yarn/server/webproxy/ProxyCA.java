@@ -16,7 +16,7 @@
  */
 package org.apache.hadoop.yarn.server.webproxy;
 
-import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
 import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;
@@ -194,9 +194,7 @@ public class ProxyCA {
     String subject = "OU=YARN-" + UUID.randomUUID();
     caCert = createCert(true, subject, subject, from, to,
         caKeyPair.getPublic(), caKeyPair.getPrivate());
-    if (LOG.isDebugEnabled()) {
-      LOG.debug("CA Certificate: \n{}", caCert);
-    }
+    LOG.debug("CA Certificate: \n{}", caCert);
   }
 
   public byte[] createChildKeyStore(ApplicationId appId, String ksPassword)

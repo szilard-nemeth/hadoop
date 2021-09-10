@@ -19,7 +19,7 @@ package org.apache.hadoop.yarn.server.nodemanager.containermanager.localizer;
 
 import static org.apache.hadoop.util.Shell.getAllShells;
 
-import com.google.common.base.Preconditions;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -84,8 +84,8 @@ import org.apache.hadoop.yarn.server.nodemanager.api.protocolrecords.ResourceSta
 import org.apache.hadoop.yarn.server.nodemanager.containermanager.localizer.security.LocalizerTokenIdentifier;
 import org.apache.hadoop.yarn.util.FSDownload;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.util.concurrent.ThreadFactoryBuilder;
 
 public class ContainerLocalizer {
 
@@ -133,13 +133,19 @@ public class ContainerLocalizer {
     this.localDirs = localDirs;
     this.localizerId = localizerId;
     this.recordFactory = recordFactory;
-    this.conf = new YarnConfiguration();
+    this.conf = initConfiguration();
     this.diskValidator = DiskValidatorFactory.getInstance(
         YarnConfiguration.DEFAULT_DISK_VALIDATOR);
     this.appCacheDirContextName = String.format(APPCACHE_CTXT_FMT, appId);
     this.pendingResources = new HashMap<LocalResource,Future<Path>>();
     this.tokenFileName = Preconditions.checkNotNull(tokenFileName,
         "token file name cannot be null");
+  }
+
+  @VisibleForTesting
+  @Private
+  Configuration initConfiguration() {
+    return new YarnConfiguration();
   }
 
   @Private
@@ -250,7 +256,8 @@ public class ContainerLocalizer {
     if (rsrc.getVisibility() == LocalResourceVisibility.PRIVATE) {
       createParentDirs(destDirPath);
     }
-    diskValidator.checkStatus(new File(destDirPath.toUri().getRawPath()));
+    diskValidator
+        .checkStatus(new File(destDirPath.getParent().toUri().getRawPath()));
     return new FSDownloadWrapper(lfs, ugi, conf, destDirPath, rsrc);
   }
 

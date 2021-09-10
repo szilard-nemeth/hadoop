@@ -39,8 +39,8 @@ import org.apache.hadoop.util.Time;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;
 import org.apache.hadoop.conf.*;
-import org.apache.htrace.core.TraceScope;
-import org.apache.htrace.core.Tracer;
+import org.apache.hadoop.tracing.TraceScope;
+import org.apache.hadoop.tracing.Tracer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -537,15 +537,15 @@ public class WritableRpcEngine implements RpcEngine {
         }
 
         // Invoke the protocol method
-        long startTime = Time.now();
-        int qTime = (int) (startTime-receivedTime);
         Exception exception = null;
+        Call currentCall = Server.getCurCall().get();
         try {
           Method method =
               protocolImpl.protocolClass.getMethod(call.getMethodName(),
               call.getParameterClasses());
           method.setAccessible(true);
           server.rpcDetailedMetrics.init(protocolImpl.protocolClass);
+          currentCall.setDetailedMetricsName(call.getMethodName());
           Object value = 
               method.invoke(protocolImpl.protocolImpl, call.getParameters());
           if (server.verbose) log("Return: "+value);
@@ -571,20 +571,10 @@ public class WritableRpcEngine implements RpcEngine {
           exception = ioe;
           throw ioe;
         } finally {
-          int processingTime = (int) (Time.now() - startTime);
-          if (LOG.isDebugEnabled()) {
-            String msg = "Served: " + call.getMethodName() +
-                " queueTime= " + qTime + " procesingTime= " + processingTime;
-            if (exception != null) {
-              msg += " exception= " + exception.getClass().getSimpleName();
-            }
-            LOG.debug(msg);
+          if (exception != null) {
+            currentCall.setDetailedMetricsName(
+                exception.getClass().getSimpleName());
           }
-          String detailedMetricsName = (exception == null) ?
-              call.getMethodName() :
-              exception.getClass().getSimpleName();
-          server
-              .updateMetrics(detailedMetricsName, qTime, processingTime, false);
         }
       }
     }

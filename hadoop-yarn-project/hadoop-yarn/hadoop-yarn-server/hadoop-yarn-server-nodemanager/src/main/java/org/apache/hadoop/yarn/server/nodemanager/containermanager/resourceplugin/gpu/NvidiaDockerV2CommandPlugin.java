@@ -18,9 +18,9 @@
 
 package org.apache.hadoop.yarn.server.nodemanager.containermanager.resourceplugin.gpu;
 
-import com.google.common.annotations.VisibleForTesting;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.hadoop.yarn.api.records.ResourceInformation;
 import org.apache.hadoop.yarn.server.nodemanager.containermanager.container.Container;
 import org.apache.hadoop.yarn.server.nodemanager.containermanager.container.ResourceMappings;
@@ -41,7 +41,8 @@ import java.util.Set;
  * Implementation to use nvidia-docker v2 as GPU docker command plugin.
  */
 public class NvidiaDockerV2CommandPlugin implements DockerCommandPlugin {
-  final static Log LOG = LogFactory.getLog(NvidiaDockerV2CommandPlugin.class);
+  final static Logger LOG = LoggerFactory.
+      getLogger(NvidiaDockerV2CommandPlugin.class);
 
   private String nvidiaRuntime = "nvidia";
   private String nvidiaVisibleDevices = "NVIDIA_VISIBLE_DEVICES";

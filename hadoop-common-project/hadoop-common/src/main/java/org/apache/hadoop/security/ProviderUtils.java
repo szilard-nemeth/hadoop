@@ -24,7 +24,7 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
 
-import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
 import org.apache.commons.io.IOUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
@@ -167,9 +167,8 @@ public final class ProviderUtils {
         }
         if (clazz != null) {
           if (fileSystemClass.isAssignableFrom(clazz)) {
-            LOG.debug("Filesystem based provider" +
-                " excluded from provider path due to recursive dependency: "
-                + provider);
+            LOG.debug("Filesystem based provider excluded from provider " +
+                "path due to recursive dependency: {}", provider);
           } else {
             if (newProviderPath.length() > 0) {
               newProviderPath.append(",");

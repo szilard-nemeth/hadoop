@@ -16,8 +16,8 @@
  */
 package org.apache.hadoop.hdfs.server.diskbalancer;
 
-import com.google.common.base.Preconditions;
-import com.google.common.base.Supplier;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
+import java.util.function.Supplier;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.conf.ReconfigurationException;
@@ -219,7 +219,6 @@ public class TestDiskBalancer {
     } finally {
       cluster.shutdown();
     }
-
   }
 
   @Test
@@ -316,13 +315,11 @@ public class TestDiskBalancer {
     final Path filePath = new Path(fileName);
     long fileLen = blockCount * blockSize;
 
-
     //Writing data only to one nameservice.
     FileSystem fs = cluster.getFileSystem(0);
     TestBalancer.createFile(cluster, filePath, fileLen, (short) 1,
         0);
     DFSTestUtil.waitReplication(fs, filePath, (short) 1);
-
 
     GenericTestUtils.LogCapturer logCapturer = GenericTestUtils.LogCapturer
         .captureLogs(DiskBalancer.LOG);
@@ -334,15 +331,14 @@ public class TestDiskBalancer {
       NodePlan plan = dataMover.generatePlan();
       dataMover.executePlan(plan);
       dataMover.verifyPlanExectionDone();
-      //Because here we have one nameservice empty, don't check
-      // blockPoolCount.
+      // Because here we have one nameservice empty, don't check blockPoolCount.
       dataMover.verifyAllVolumesHaveData(false);
     } finally {
-      Assert.assertTrue(logCapturer.getOutput().contains("There are no " +
-          "blocks in the blockPool"));
+      String logOut = logCapturer.getOutput();
+      Assert.assertTrue("Wrong log: " + logOut, logOut.contains(
+          "NextBlock call returned null. No valid block to copy."));
       cluster.shutdown();
     }
-
   }
 
   @Test
@@ -646,7 +642,7 @@ public class TestDiskBalancer {
 
       node = cluster.getDataNodes().get(dataNodeIndex);
       String planJson = plan.toJson();
-      String planID = DigestUtils.shaHex(planJson);
+      String planID = DigestUtils.sha1Hex(planJson);
 
       // Submit the plan and wait till the execution is done.
       node.submitDiskBalancerPlan(planID, 1, PLAN_FILE, planJson,
@@ -744,7 +740,7 @@ public class TestDiskBalancer {
       reconfigThread.start();
 
       String planJson = plan.toJson();
-      String planID = DigestUtils.shaHex(planJson);
+      String planID = DigestUtils.sha1Hex(planJson);
       diskBalancer.submitPlan(planID, 1, PLAN_FILE, planJson, false);
 
       GenericTestUtils.waitFor(new Supplier<Boolean>() {
@@ -761,7 +757,7 @@ public class TestDiskBalancer {
         }
       }, 1000, 100000);
 
-      assertTrue("Disk balancer operation hit max errors!", errorCount.get() <
+      assertTrue("Disk balancer operation hit max errors!", errorCount.get() <=
           DFSConfigKeys.DFS_DISK_BALANCER_MAX_DISK_ERRORS_DEFAULT);
       createWorkPlanLatch.await();
       removeDiskLatch.await();

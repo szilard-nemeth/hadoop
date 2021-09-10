@@ -34,13 +34,13 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.GZIPOutputStream;
 
-import com.google.common.base.Supplier;
-import com.google.common.collect.Lists;
+import java.util.function.Supplier;
 
 import org.apache.commons.lang3.RandomStringUtils;
+import org.apache.hadoop.hdfs.protocol.XAttrNotFoundException;
+import org.apache.hadoop.util.Lists;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.apache.log4j.Level;
 import org.junit.Test;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.*;
@@ -71,6 +71,8 @@ import org.junit.rules.Timeout;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Rule;
+import org.junit.Assert;
+import org.slf4j.event.Level;
 
 import static org.apache.hadoop.fs.CommonConfigurationKeysPublic.FS_TRASH_INTERVAL_KEY;
 import static org.apache.hadoop.fs.permission.AclEntryScope.ACCESS;
@@ -116,7 +118,7 @@ public class TestDFSShell {
         GenericTestUtils.getTestDir("TestDFSShell").getAbsolutePath());
     conf.setBoolean(DFSConfigKeys.DFS_NAMENODE_XATTRS_ENABLED_KEY, true);
     conf.setBoolean(DFSConfigKeys.DFS_NAMENODE_ACLS_ENABLED_KEY, true);
-    conf.setLong(DFSConfigKeys.DFS_NAMENODE_ACCESSTIME_PRECISION_KEY, 1000);
+    conf.setLong(DFSConfigKeys.DFS_NAMENODE_ACCESSTIME_PRECISION_KEY, 120000);
 
     miniCluster = new MiniDFSCluster.Builder(conf).numDataNodes(2).build();
     miniCluster.waitActive();
@@ -1122,6 +1124,31 @@ public class TestDFSShell {
   }
 
   @Test (timeout = 30000)
+  public void testChecksum() throws Exception {
+    PrintStream printStream = System.out;
+    try {
+      ByteArrayOutputStream out = new ByteArrayOutputStream();
+      System.setOut(new PrintStream(out));
+      FsShell shell = new FsShell(dfs.getConf());
+      final Path filePath = new Path("/testChecksum/file1");
+      writeFile(dfs, filePath);
+      FileStatus fileStatus = dfs.getFileStatus(filePath);
+      FileChecksum checksum = dfs.getFileChecksum(filePath);
+      String[] args = {"-checksum", "-v", filePath.toString()};
+      assertEquals(0, shell.run(args));
+      // verify block size is printed in the output
+      assertTrue(out.toString()
+          .contains(String.format("BlockSize=%s", fileStatus.getBlockSize())));
+      // verify checksum is printed in the output
+      assertTrue(out.toString().contains(StringUtils
+          .byteToHexString(checksum.getBytes(), 0, checksum.getLength())));
+    } finally {
+      Assert.assertNotNull(printStream);
+      System.setOut(printStream);
+    }
+  }
+
+  @Test (timeout = 30000)
   public void testCopyToLocal() throws IOException {
     FsShell shell = new FsShell(dfs.getConf());
 
@@ -1276,9 +1303,6 @@ public class TestDFSShell {
       exitCode = shell.run(args);
       LOG.info("RUN: "+args[0]+" exit=" + exitCode);
       return exitCode;
-    } catch (IOException e) {
-      LOG.error("RUN: "+args[0]+" IOException="+e.getMessage());
-      throw e;
     } catch (RuntimeException e) {
       LOG.error("RUN: "+args[0]+" RuntimeException="+e.getMessage());
       throw e;
@@ -1445,6 +1469,9 @@ public class TestDFSShell {
 
     runCmd(shell, "-chgrp", "hadoop-core@apache.org/100", file);
     confirmOwner(null, "hadoop-core@apache.org/100", fs, path);
+
+    runCmd(shell, "-chown", "MYCOMPANY+user.name:hadoop", file);
+    confirmOwner("MYCOMPANY+user.name", "hadoop", fs, path);
   }
 
   /**
@@ -1936,7 +1963,7 @@ public class TestDFSShell {
 
   @Test (timeout = 30000)
   public void testGet() throws IOException {
-    GenericTestUtils.setLogLevel(FSInputChecker.LOG, Level.ALL);
+    GenericTestUtils.setLogLevel(FSInputChecker.LOG, Level.TRACE);
 
     final String fname = "testGet.txt";
     Path root = new Path("/test/get");
@@ -3412,7 +3439,7 @@ public class TestDFSShell {
         String str = out.toString();
         assertTrue("xattr value was incorrectly returned",
           str.indexOf(
-              "getfattr: At least one of the attributes provided was not found")
+              "getfattr: " + XAttrNotFoundException.DEFAULT_EXCEPTION_MSG)
                >= 0);
         out.reset();
       }

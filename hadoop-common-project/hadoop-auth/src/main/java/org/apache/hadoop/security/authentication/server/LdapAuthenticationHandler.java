@@ -38,8 +38,8 @@ import org.apache.hadoop.security.authentication.client.AuthenticationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
 
 /**
  * The {@link LdapAuthenticationHandler} implements the BASIC authentication
@@ -96,9 +96,8 @@ public class LdapAuthenticationHandler implements AuthenticationHandler {
   public static final String LDAP_BIND_DOMAIN = TYPE + ".binddomain";
 
   /**
-   * Constant for the configuration property that indicates the base
-   * distinguished name (DN) to be used with the LDAP server. This value is
-   * appended to the provided user id for authentication purpose.
+   * Constant for the configuration property that indicates whether
+   * the LDAP server supports 'StartTLS' extension.
    */
   public static final String ENABLE_START_TLS = TYPE + ".enablestarttls";
 

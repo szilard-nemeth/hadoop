@@ -18,7 +18,6 @@
 
 package org.apache.hadoop.mapred.uploader;
 
-import com.google.common.collect.Lists;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
 import org.apache.commons.io.FileUtils;
@@ -32,6 +31,7 @@ import org.apache.hadoop.hdfs.MiniDFSCluster;
 import org.apache.hadoop.hdfs.DFSConfigKeys;
 import org.apache.hadoop.hdfs.DistributedFileSystem;
 import org.apache.hadoop.hdfs.HdfsConfiguration;
+import org.apache.hadoop.util.Lists;
 import org.junit.Assert;
 import org.junit.Assume;
 import org.junit.Before;
@@ -53,6 +53,7 @@ import java.util.Random;
 import java.util.Set;
 import java.util.zip.GZIPInputStream;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.apache.hadoop.fs.FileSystem.FS_DEFAULT_NAME_KEY;
 
 /**
@@ -82,12 +83,15 @@ public class TestFrameworkUploader {
     FrameworkUploader uploader = new FrameworkUploader();
     boolean success = uploader.parseArguments(args);
     Assert.assertFalse("Expected to print help", success);
-    Assert.assertEquals("Expected ignore run", null,
-        uploader.input);
-    Assert.assertEquals("Expected ignore run", null,
-        uploader.whitelist);
-    Assert.assertEquals("Expected ignore run", null,
-        uploader.target);
+    assertThat(uploader.input)
+        .withFailMessage("Expected ignore run")
+        .isNull();
+    assertThat(uploader.whitelist)
+        .withFailMessage("Expected ignore run")
+        .isNull();
+    assertThat(uploader.target)
+        .withFailMessage("Expected ignore run")
+        .isNull();
   }
 
   /**
@@ -473,7 +477,7 @@ public class TestFrameworkUploader {
       }
       Assert.assertFalse(uploader.checkSymlink(symlinkOutside));
     } finally {
-      FileUtils.deleteDirectory(parent);
+      FileUtils.forceDelete(parent);
     }
 
   }

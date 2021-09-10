@@ -32,7 +32,7 @@ import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
-import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.util.Time;
@@ -49,10 +49,6 @@ public class ConnectionManager {
   private static final Logger LOG =
       LoggerFactory.getLogger(ConnectionManager.class);
 
-  /** Minimum amount of active connections: 50%. */
-  protected static final float MIN_ACTIVE_RATIO = 0.5f;
-
-
   /** Configuration for the connection manager, pool and sockets. */
   private final Configuration conf;
 
@@ -60,6 +56,8 @@ public class ConnectionManager {
   private final int minSize = 1;
   /** Max number of connections per user + nn. */
   private final int maxSize;
+  /** Min ratio of active connections per user + nn. */
+  private final float minActiveRatio;
 
   /** How often we close a pool for a particular user + nn. */
   private final long poolCleanupPeriodMs;
@@ -96,10 +94,13 @@ public class ConnectionManager {
   public ConnectionManager(Configuration config) {
     this.conf = config;
 
-    // Configure minimum and maximum connection pools
+    // Configure minimum, maximum and active connection pools
     this.maxSize = this.conf.getInt(
         RBFConfigKeys.DFS_ROUTER_NAMENODE_CONNECTION_POOL_SIZE,
         RBFConfigKeys.DFS_ROUTER_NAMENODE_CONNECTION_POOL_SIZE_DEFAULT);
+    this.minActiveRatio = this.conf.getFloat(
+        RBFConfigKeys.DFS_ROUTER_NAMENODE_CONNECTION_MIN_ACTIVE_RATIO,
+        RBFConfigKeys.DFS_ROUTER_NAMENODE_CONNECTION_MIN_ACTIVE_RATIO_DEFAULT);
 
     // Map with the connections indexed by UGI and Namenode
     this.pools = new HashMap<>();
@@ -203,7 +204,8 @@ public class ConnectionManager {
         pool = this.pools.get(connectionId);
         if (pool == null) {
           pool = new ConnectionPool(
-              this.conf, nnAddress, ugi, this.minSize, this.maxSize, protocol);
+              this.conf, nnAddress, ugi, this.minSize, this.maxSize,
+              this.minActiveRatio, protocol);
           this.pools.put(connectionId, pool);
         }
       } finally {
@@ -280,6 +282,42 @@ public class ConnectionManager {
   }
 
   /**
+   * Get number of idle connections.
+   *
+   * @return Number of active connections.
+   */
+  public int getNumIdleConnections() {
+    int total = 0;
+    readLock.lock();
+    try {
+      for (ConnectionPool pool : this.pools.values()) {
+        total += pool.getNumIdleConnections();
+      }
+    } finally {
+      readLock.unlock();
+    }
+    return total;
+  }
+
+  /**
+   * Get number of recently active connections.
+   *
+   * @return Number of recently active connections.
+   */
+  public int getNumActiveConnectionsRecently() {
+    int total = 0;
+    readLock.lock();
+    try {
+      for (ConnectionPool pool : this.pools.values()) {
+        total += pool.getNumActiveConnectionsRecently();
+      }
+    } finally {
+      readLock.unlock();
+    }
+    return total;
+  }
+
+  /**
    * Get the number of connections to be created.
    *
    * @return Number of connections to be created.
@@ -325,11 +363,21 @@ public class ConnectionManager {
       // Check if the pool hasn't been active in a while or not 50% are used
       long timeSinceLastActive = Time.now() - pool.getLastActiveTime();
       int total = pool.getNumConnections();
-      int active = pool.getNumActiveConnections();
+      // Active is a transient status in many cases for a connection since
+      // the handler thread uses the connection very quickly. Thus the number
+      // of connections with handlers using at the call time is constantly low.
+      // Recently active is more lasting status and it shows how many
+      // connections have been used with a recent time period. (i.e. 30 seconds)
+      int active = pool.getNumActiveConnectionsRecently();
+      float poolMinActiveRatio = pool.getMinActiveRatio();
       if (timeSinceLastActive > connectionCleanupPeriodMs ||
-          active < MIN_ACTIVE_RATIO * total) {
-        // Remove and close 1 connection
-        List<ConnectionContext> conns = pool.removeConnections(1);
+          active < poolMinActiveRatio * total) {
+        // Be greedy here to close as many connections as possible in one shot
+        // The number should at least be 1
+        int targetConnectionsCount = Math.max(1,
+            (int)(poolMinActiveRatio * total) - active);
+        List<ConnectionContext> conns =
+            pool.removeConnections(targetConnectionsCount);
         for (ConnectionContext conn : conns) {
           conn.close();
         }
@@ -393,7 +441,7 @@ public class ConnectionManager {
   /**
    * Thread that creates connections asynchronously.
    */
-  private static class ConnectionCreator extends Thread {
+  static class ConnectionCreator extends Thread {
     /** If the creator is running. */
     private boolean running = true;
     /** Queue to push work to. */
@@ -411,9 +459,10 @@ public class ConnectionManager {
           ConnectionPool pool = this.queue.take();
           try {
             int total = pool.getNumConnections();
-            int active = pool.getNumActiveConnections();
+            int active = pool.getNumActiveConnectionsRecently();
+            float poolMinActiveRatio = pool.getMinActiveRatio();
             if (pool.getNumConnections() < pool.getMaxSize() &&
-                active >= MIN_ACTIVE_RATIO * total) {
+                active >= poolMinActiveRatio * total) {
               ConnectionContext conn = pool.newConnection();
               pool.addConnection(conn);
             } else {
@@ -426,6 +475,8 @@ public class ConnectionManager {
         } catch (InterruptedException e) {
           LOG.error("The connection creator was interrupted");
           this.running = false;
+        } catch (Throwable e) {
+          LOG.error("Fatal error caught by connection creator ", e);
         }
       }
     }

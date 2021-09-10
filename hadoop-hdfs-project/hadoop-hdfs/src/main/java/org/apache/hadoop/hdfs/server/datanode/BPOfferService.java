@@ -17,10 +17,8 @@
  */
 package org.apache.hadoop.hdfs.server.datanode;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Preconditions;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Sets;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
 
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.fs.StorageType;
@@ -33,6 +31,8 @@ import org.apache.hadoop.hdfs.protocolPB.DatanodeProtocolClientSideTranslatorPB;
 import org.apache.hadoop.hdfs.server.protocol.*;
 import org.apache.hadoop.hdfs.server.protocol.BlockECReconstructionCommand.BlockECReconstructionInfo;
 import org.apache.hadoop.hdfs.server.protocol.ReceivedDeletedBlockInfo.BlockStatus;
+import org.apache.hadoop.util.Lists;
+import org.apache.hadoop.util.Sets;
 
 import org.slf4j.Logger;
 
@@ -81,7 +81,7 @@ class BPOfferService {
    * this can be null. If non-null, this must always refer to a member
    * of the {@link #bpServices} list.
    */
-  private BPServiceActor bpServiceToActive = null;
+  private volatile BPServiceActor bpServiceToActive = null;
   
   /**
    * The list of all actors for namenodes in this nameservice, regardless
@@ -206,6 +206,7 @@ class BPOfferService {
     if (id != null) {
       return id;
     }
+    DataNodeFaultInjector.get().delayWhenOfferServiceHoldLock();
     readLock();
     try {
       if (bpNSInfo != null) {
@@ -382,6 +383,7 @@ class BPOfferService {
     }
 
     try {
+      DataNodeFaultInjector.get().delayWhenOfferServiceHoldLock();
       if (setNamespaceInfo(nsInfo) == null) {
         boolean success = false;
 
@@ -421,7 +423,7 @@ class BPOfferService {
             reg.getStorageInfo().getClusterID(), "cluster ID");
       }
       bpRegistration = reg;
-
+      DataNodeFaultInjector.get().delayWhenOfferServiceHoldLock();
       dn.bpRegistrationSucceeded(bpRegistration, getBlockPoolId());
       // Add the initial block token secret keys to the DN's secret manager.
       if (dn.isBlockTokenEnabled) {
@@ -496,7 +498,7 @@ class BPOfferService {
    */
   void scheduleBlockReport(long delay) {
     for (BPServiceActor actor : bpServices) {
-      actor.getScheduler().scheduleBlockReport(delay);
+      actor.getScheduler().scheduleBlockReport(delay, false);
     }
   }
 

@@ -30,7 +30,7 @@ import org.apache.hadoop.yarn.server.nodemanager.containermanager.linux.privileg
 import org.apache.hadoop.yarn.server.nodemanager.containermanager.linux.privileged.PrivilegedOperationExecutor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -153,9 +153,7 @@ public class NetworkPacketTaggingHandlerImpl
   @Override
   public List<PrivilegedOperation> teardown()
       throws ResourceHandlerException {
-    if (LOG.isDebugEnabled()) {
-      LOG.debug("teardown(): Nothing to do");
-    }
+    LOG.debug("teardown(): Nothing to do");
 
     return null;
   }

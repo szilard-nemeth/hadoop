@@ -22,7 +22,7 @@ import java.io.IOException;
 import java.security.PrivilegedExceptionAction;
 import java.util.ArrayList;
 
-import com.google.common.base.Joiner;
+import org.apache.hadoop.thirdparty.com.google.common.base.Joiner;
 import org.apache.hadoop.classification.InterfaceStability;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.io.Text;
@@ -51,7 +51,7 @@ import org.apache.hadoop.yarn.server.utils.YarnServerSecurityUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
 
 /**
  * Extends the AbstractRequestInterceptor class and provides an implementation
@@ -129,9 +129,7 @@ public final class DefaultRequestInterceptor extends
   @Override
   public AllocateResponse allocate(final AllocateRequest request)
       throws YarnException, IOException {
-    if (LOG.isDebugEnabled()) {
-      LOG.debug("Forwarding allocate request to the real YARN RM");
-    }
+    LOG.debug("Forwarding allocate request to the real YARN RM");
     AllocateResponse allocateResponse = rmClient.allocate(request);
     if (allocateResponse.getAMRMToken() != null) {
       YarnServerSecurityUtils.updateAMRMToken(allocateResponse.getAMRMToken(),
@@ -161,10 +159,8 @@ public final class DefaultRequestInterceptor extends
   public DistributedSchedulingAllocateResponse allocateForDistributedScheduling(
       DistributedSchedulingAllocateRequest request)
       throws YarnException, IOException {
-    if (LOG.isDebugEnabled()) {
-      LOG.debug("Forwarding allocateForDistributedScheduling request" +
-          "to the real YARN RM");
-    }
+    LOG.debug("Forwarding allocateForDistributedScheduling request" +
+        "to the real YARN RM");
     if (getApplicationContext().getNMCotext()
         .isDistributedSchedulingEnabled()) {
       DistributedSchedulingAllocateResponse allocateResponse =

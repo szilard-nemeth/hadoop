@@ -21,7 +21,7 @@ import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
-import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hdfs.server.federation.store.CachedRecordStore;
 import org.apache.hadoop.hdfs.server.federation.store.MembershipStore;
@@ -29,6 +29,7 @@ import org.apache.hadoop.hdfs.server.federation.store.MountTableStore;
 import org.apache.hadoop.hdfs.server.federation.store.RecordStore;
 import org.apache.hadoop.hdfs.server.federation.store.RouterStore;
 import org.apache.hadoop.hdfs.server.federation.store.StateStoreService;
+import org.apache.hadoop.hdfs.server.federation.store.StateStoreUtils;
 import org.apache.hadoop.hdfs.server.federation.store.protocol.RouterHeartbeatRequest;
 import org.apache.hadoop.hdfs.server.federation.store.protocol.RouterHeartbeatResponse;
 import org.apache.hadoop.hdfs.server.federation.store.records.BaseRecord;
@@ -91,6 +92,10 @@ public class RouterHeartbeatService extends PeriodicService {
             getStateStoreVersion(MembershipStore.class),
             getStateStoreVersion(MountTableStore.class));
         record.setStateStoreVersion(stateStoreVersion);
+        // if admin server not started then hostPort will be empty
+        String hostPort =
+            StateStoreUtils.getHostPortString(router.getAdminServerAddress());
+        record.setAdminAddress(hostPort);
         RouterHeartbeatRequest request =
             RouterHeartbeatRequest.newInstance(record);
         RouterHeartbeatResponse response = routerStore.routerHeartbeat(request);

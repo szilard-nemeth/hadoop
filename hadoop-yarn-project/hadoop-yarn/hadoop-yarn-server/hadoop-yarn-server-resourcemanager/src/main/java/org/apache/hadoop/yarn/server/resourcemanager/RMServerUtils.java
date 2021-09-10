@@ -30,14 +30,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import com.google.common.collect.Sets;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.security.AccessControlException;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.security.authorize.AccessControlList;
 import org.apache.hadoop.security.authorize.ProxyUsers;
+import org.apache.hadoop.util.Sets;
 import org.apache.hadoop.yarn.api.protocolrecords.AllocateRequest;
 import org.apache.hadoop.yarn.api.records.ApplicationAttemptId;
 import org.apache.hadoop.yarn.api.records.ApplicationResourceUsageReport;
@@ -83,13 +81,16 @@ import org.apache.hadoop.yarn.util.Clock;
 import org.apache.hadoop.yarn.util.SystemClock;
 import org.apache.hadoop.yarn.util.Times;
 import org.apache.hadoop.yarn.util.resource.Resources;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Utility methods to aid serving RM data through the REST and RPC APIs
  */
 public class RMServerUtils {
 
-  private static final Log LOG_HANDLE = LogFactory.getLog(RMServerUtils.class);
+  private static final Logger LOG_HANDLE =
+      LoggerFactory.getLogger(RMServerUtils.class);
 
   public static final String UPDATE_OUTSTANDING_ERROR =
       "UPDATE_OUTSTANDING_ERROR";
@@ -239,12 +240,13 @@ public class RMServerUtils {
   }
 
   /**
-   * Utility method to validate a list resource requests, by insuring that the
+   * Utility method to validate a list resource requests, by ensuring that the
    * requested memory/vcore is non-negative and not greater than max
    */
   public static void normalizeAndValidateRequests(List<ResourceRequest> ask,
       Resource maximumAllocation, String queueName, YarnScheduler scheduler,
-      RMContext rmContext) throws InvalidResourceRequestException {
+      RMContext rmContext, boolean nodeLabelsEnabled)
+          throws InvalidResourceRequestException {
     // Get queue from scheduler
     QueueInfo queueInfo = null;
     try {
@@ -256,7 +258,7 @@ public class RMServerUtils {
 
     for (ResourceRequest resReq : ask) {
       SchedulerUtils.normalizeAndValidateRequest(resReq, maximumAllocation,
-          queueName, scheduler, rmContext, queueInfo);
+          queueName, rmContext, queueInfo, nodeLabelsEnabled);
     }
   }
 
@@ -377,7 +379,7 @@ public class RMServerUtils {
   }
 
   public static UserGroupInformation verifyAdminAccess(
-      YarnAuthorizationProvider authorizer, String method, final Log LOG)
+      YarnAuthorizationProvider authorizer, String method, final Logger LOG)
       throws IOException {
     // by default, this method will use AdminService as module name
     return verifyAdminAccess(authorizer, method, "AdminService", LOG);
@@ -396,7 +398,7 @@ public class RMServerUtils {
    */
   public static UserGroupInformation verifyAdminAccess(
       YarnAuthorizationProvider authorizer, String method, String module,
-      final Log LOG)
+      final Logger LOG)
       throws IOException {
     UserGroupInformation user;
     try {

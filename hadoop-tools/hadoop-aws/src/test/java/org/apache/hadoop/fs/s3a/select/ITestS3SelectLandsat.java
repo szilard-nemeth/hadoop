@@ -21,6 +21,7 @@ package org.apache.hadoop.fs.s3a.select;
 import java.io.IOException;
 import java.util.List;
 
+import org.junit.Assume;
 import org.junit.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,12 +33,14 @@ import org.apache.hadoop.fs.FSDataInputStream;
 import org.apache.hadoop.fs.FileContext;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.PathIOException;
+import org.apache.hadoop.fs.s3a.impl.ChangeDetectionPolicy;
+import org.apache.hadoop.fs.s3a.impl.ChangeDetectionPolicy.Source;
+import org.apache.hadoop.fs.s3a.statistics.S3AInputStreamStatistics;
 import org.apache.hadoop.fs.s3a.S3AFileSystem;
-import org.apache.hadoop.fs.s3a.S3AInstrumentation;
 import org.apache.hadoop.fs.s3a.S3ATestUtils;
 import org.apache.hadoop.fs.s3a.Statistic;
-import org.apache.hadoop.fs.s3a.commit.DurationInfo;
 import org.apache.hadoop.mapred.JobConf;
+import org.apache.hadoop.util.DurationInfo;
 
 import static org.apache.hadoop.fs.s3a.S3ATestUtils.assume;
 import static org.apache.hadoop.fs.s3a.S3ATestUtils.getTestPropertyBool;
@@ -190,6 +193,11 @@ public class ITestS3SelectLandsat extends AbstractS3SelectTest {
     // disable the gzip codec, so that the record readers do not
     // get confused
     enablePassthroughCodec(selectConf, ".gz");
+    ChangeDetectionPolicy changeDetectionPolicy =
+        getLandsatFS().getChangeDetectionPolicy();
+    Assume.assumeFalse("the standard landsat bucket doesn't have versioning",
+        changeDetectionPolicy.getSource() == Source.VersionId
+            && changeDetectionPolicy.isRequireVersion());
   }
 
   protected int getMaxLines() {
@@ -373,7 +381,7 @@ public class ITestS3SelectLandsat extends AbstractS3SelectTest {
                  SELECT_EVERYTHING)) {
       SelectInputStream sis
           = (SelectInputStream) seekStream.getWrappedStream();
-      S3AInstrumentation.InputStreamStatistics streamStats
+      S3AInputStreamStatistics streamStats
           = sis.getS3AStreamStatistics();
       // lazy seek doesn't raise a problem here
       seekStream.seek(0);
@@ -402,7 +410,7 @@ public class ITestS3SelectLandsat extends AbstractS3SelectTest {
       assertEquals("byte at seek position",
           dataset[(int) seekStream.getPos()], seekStream.read());
       assertEquals("Seek bytes skipped in " + streamStats,
-          seekRange, streamStats.bytesSkippedOnSeek);
+          seekRange, streamStats.getBytesSkippedOnSeek());
       long offset;
       long increment = 64 * _1KB;
 

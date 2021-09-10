@@ -17,10 +17,9 @@
  */
 package org.apache.hadoop.hdfs.qjournal.server;
 
-import com.google.protobuf.ByteString;
+import org.apache.hadoop.thirdparty.protobuf.ByteString;
 import java.io.Closeable;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStreamWriter;
@@ -72,11 +71,11 @@ import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.util.StopWatch;
 import org.apache.hadoop.util.Time;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Charsets;
-import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableList;
-import com.google.protobuf.TextFormat;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.base.Charsets;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
+import org.apache.hadoop.thirdparty.com.google.common.collect.ImmutableList;
+import org.apache.hadoop.thirdparty.protobuf.TextFormat;
 
 /**
  * A JournalNode can manage journals for several clusters at once.
@@ -139,11 +138,13 @@ public class Journal implements Closeable {
   
   private final FileJournalManager fjm;
 
-  private final JournaledEditsCache cache;
+  private JournaledEditsCache cache;
 
   private final JournalMetrics metrics;
 
   private long lastJournalTimestamp = 0;
+
+  private Configuration conf = null;
 
   // This variable tracks, have we tried to start journalsyncer
   // with nameServiceId. This will help not to start the journalsyncer
@@ -158,6 +159,7 @@ public class Journal implements Closeable {
   Journal(Configuration conf, File logDir, String journalId,
       StartupOption startOpt, StorageErrorReporter errorReporter)
       throws IOException {
+    this.conf = conf;
     storage = new JNStorage(conf, logDir, startOpt, errorReporter);
     this.journalId = journalId;
 
@@ -165,18 +167,22 @@ public class Journal implements Closeable {
     
     this.fjm = storage.getJournalManager();
 
-    if (conf.getBoolean(DFSConfigKeys.DFS_HA_TAILEDITS_INPROGRESS_KEY,
-        DFSConfigKeys.DFS_HA_TAILEDITS_INPROGRESS_DEFAULT)) {
-      this.cache = new JournaledEditsCache(conf);
-    } else {
-      this.cache = null;
-    }
-    
+    this.cache = createCache();
+
     this.metrics = JournalMetrics.create(this);
     
     EditLogFile latest = scanStorageForLatestEdits();
     if (latest != null) {
       updateHighestWrittenTxId(latest.getLastTxId());
+    }
+  }
+
+  private JournaledEditsCache createCache() {
+    if (conf.getBoolean(DFSConfigKeys.DFS_HA_TAILEDITS_INPROGRESS_KEY,
+        DFSConfigKeys.DFS_HA_TAILEDITS_INPROGRESS_DEFAULT)) {
+      return new JournaledEditsCache(conf);
+    } else {
+      return null;
     }
   }
 
@@ -249,6 +255,7 @@ public class Journal implements Closeable {
     LOG.info("Formatting journal id : " + journalId + " with namespace info: " +
         nsInfo + " and force: " + force);
     storage.format(nsInfo, force);
+    this.cache = createCache();
     refreshCachedData();
   }
 
@@ -257,9 +264,9 @@ public class Journal implements Closeable {
    */
   @Override // Closeable
   public void close() throws IOException {
-    storage.close();
     IOUtils.closeStream(committedTxnId);
     IOUtils.closeStream(curSegment);
+    storage.close();
   }
   
   JNStorage getStorage() {
@@ -1058,7 +1065,7 @@ public class Journal implements Closeable {
       return null;
     }
     
-    InputStream in = new FileInputStream(f);
+    InputStream in = Files.newInputStream(f.toPath());
     try {
       PersistedRecoveryPaxosData ret = PersistedRecoveryPaxosData.parseDelimitedFrom(in);
       Preconditions.checkState(ret != null &&
@@ -1084,11 +1091,12 @@ public class Journal implements Closeable {
       fos.write('\n');
       // Write human-readable data after the protobuf. This is only
       // to assist in debugging -- it's not parsed at all.
-      OutputStreamWriter writer = new OutputStreamWriter(fos, Charsets.UTF_8);
-      
-      writer.write(String.valueOf(newData));
-      writer.write('\n');
-      writer.flush();
+      try(OutputStreamWriter writer =
+          new OutputStreamWriter(fos, Charsets.UTF_8)) {
+        writer.write(String.valueOf(newData));
+        writer.write('\n');
+        writer.flush();
+      }
       
       fos.flush();
       success = true;
@@ -1119,7 +1127,7 @@ public class Journal implements Closeable {
         + ".\n   new LV = " + storage.getLayoutVersion()
         + "; new CTime = " + storage.getCTime());
     storage.getJournalManager().doUpgrade(storage);
-    storage.createPaxosDir();
+    storage.getOrCreatePaxosDir();
     
     // Copy over the contents of the epoch data files to the new dir.
     File currentDir = storage.getSingularStorageDir().getCurrentDir();
@@ -1170,6 +1178,8 @@ public class Journal implements Closeable {
     // directory will be renamed.  It will be reopened lazily on next access.
     IOUtils.cleanupWithLogger(LOG, committedTxnId);
     storage.getJournalManager().doRollback();
+    // HADOOP-17142: refresh properties after rollback performed.
+    storage.refreshStorage();
   }
 
   synchronized void discardSegments(long startTxId) throws IOException {

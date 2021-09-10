@@ -43,6 +43,7 @@ import java.util.LinkedList;
 import java.util.List;
 
 import org.apache.commons.lang3.time.DateUtils;
+import org.apache.hadoop.hdfs.server.namenode.ha.HATestUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.hadoop.conf.Configuration;
@@ -60,9 +61,11 @@ import org.apache.hadoop.hdfs.client.impl.BlockReaderTestUtil;
 import org.apache.hadoop.hdfs.DFSConfigKeys;
 import org.apache.hadoop.hdfs.DFSTestUtil;
 import org.apache.hadoop.hdfs.DistributedFileSystem;
+import org.apache.hadoop.hdfs.MiniDFSNNTopology;
 import org.apache.hadoop.hdfs.HdfsConfiguration;
 import org.apache.hadoop.hdfs.MiniDFSCluster;
 import org.apache.hadoop.hdfs.protocol.CacheDirectiveEntry;
+import org.apache.hadoop.hdfs.protocol.CacheDirective;
 import org.apache.hadoop.hdfs.protocol.CacheDirectiveInfo;
 import org.apache.hadoop.hdfs.protocol.CacheDirectiveInfo.Expiration;
 import org.apache.hadoop.hdfs.protocol.CacheDirectiveIterator;
@@ -93,7 +96,7 @@ import org.junit.Before;
 import org.junit.Test;
 import org.mockito.Mockito;
 
-import com.google.common.base.Supplier;
+import java.util.function.Supplier;
 
 public class TestCacheDirectives {
   static final Logger LOG = LoggerFactory.getLogger(TestCacheDirectives.class);
@@ -129,8 +132,14 @@ public class TestCacheDirectives {
     conf.setInt(DFSConfigKeys.DFS_NAMENODE_LIST_CACHE_POOLS_NUM_RESPONSES, 2);
     conf.setInt(DFSConfigKeys.DFS_NAMENODE_LIST_CACHE_DIRECTIVES_NUM_RESPONSES,
         2);
-
     return conf;
+  }
+
+  /**
+   * @return the configuration.
+   */
+  Configuration getConf() {
+    return this.conf;
   }
 
   @Before
@@ -139,12 +148,19 @@ public class TestCacheDirectives {
     cluster =
         new MiniDFSCluster.Builder(conf).numDataNodes(NUM_DATANODES).build();
     cluster.waitActive();
-    dfs = cluster.getFileSystem();
+    dfs = getDFS();
     proto = cluster.getNameNodeRpc();
     namenode = cluster.getNameNode();
     prevCacheManipulator = NativeIO.POSIX.getCacheManipulator();
     NativeIO.POSIX.setCacheManipulator(new NoMlockCacheManipulator());
     BlockReaderTestUtil.enableHdfsCachingTracing();
+  }
+
+  /**
+   * @return the dfs instance.
+   */
+  DistributedFileSystem getDFS() throws IOException {
+    return (DistributedFileSystem) FileSystem.get(conf);
   }
 
   @After
@@ -627,10 +643,12 @@ public class TestCacheDirectives {
       String groupName = "partygroup";
       FsPermission mode = new FsPermission((short)0777);
       long limit = 747;
+      long maxExpiry = 1234567890;
       dfs.addCachePool(new CachePoolInfo(pool)
           .setGroupName(groupName)
           .setMode(mode)
-          .setLimit(limit));
+          .setLimit(limit)
+          .setMaxRelativeExpiryMs(maxExpiry));
       RemoteIterator<CachePoolEntry> pit = dfs.listCachePools();
       assertTrue("No cache pools found", pit.hasNext());
       CachePoolInfo info = pit.next().getInfo();
@@ -638,6 +656,7 @@ public class TestCacheDirectives {
       assertEquals(groupName, info.getGroupName());
       assertEquals(mode, info.getMode());
       assertEquals(limit, (long)info.getLimit());
+      assertEquals(maxExpiry, (long)info.getMaxRelativeExpiryMs());
       assertFalse("Unexpected # of cache pools found", pit.hasNext());
     
       // Create some cache entries
@@ -698,6 +717,7 @@ public class TestCacheDirectives {
       assertEquals(groupName, info.getGroupName());
       assertEquals(mode, info.getMode());
       assertEquals(limit, (long)info.getLimit());
+      assertEquals(maxExpiry, (long)info.getMaxRelativeExpiryMs());
       assertFalse("Unexpected # of cache pools found", pit.hasNext());
     
       dit = dfs.listCacheDirectives(null);
@@ -1604,5 +1624,74 @@ public class TestCacheDirectives {
     Thread.sleep(20000);
     waitForCachedBlocks(namenode, expected, 0,
             "testAddingCacheDirectiveInfosWhenCachingIsDisabled:2");
+  }
+
+  /**
+   * @return the dfs instance for nnIdx.
+   */
+  DistributedFileSystem getDFS(MiniDFSCluster cluster, int nnIdx)
+      throws IOException {
+    return cluster.getFileSystem(0);
+  }
+
+  @Test(timeout=120000)
+  public void testExpiryTimeConsistency() throws Exception {
+    conf.setInt(DFSConfigKeys.DFS_HA_LOGROLL_PERIOD_KEY, 1);
+    conf.setInt(DFSConfigKeys.DFS_HA_TAILEDITS_PERIOD_KEY, 1);
+    MiniDFSCluster dfsCluster =
+        new MiniDFSCluster.Builder(conf).numDataNodes(NUM_DATANODES)
+            .nnTopology(MiniDFSNNTopology.simpleHATopology())
+            .build();
+    dfsCluster.transitionToActive(0);
+
+    DistributedFileSystem fs = getDFS(dfsCluster, 0);
+    final NameNode ann = dfsCluster.getNameNode(0);
+
+    final Path filename = new Path("/file");
+    final short replication = (short) 3;
+    DFSTestUtil.createFile(fs, filename, 1, replication, 0x0BAC);
+    fs.addCachePool(new CachePoolInfo("pool"));
+    long id = fs.addCacheDirective(
+        new CacheDirectiveInfo.Builder().setPool("pool").setPath(filename)
+            .setExpiration(CacheDirectiveInfo.Expiration.newRelative(86400000))
+            .setReplication(replication).build());
+    fs.modifyCacheDirective(new CacheDirectiveInfo.Builder()
+        .setId(id)
+        .setExpiration(CacheDirectiveInfo.Expiration.newRelative(172800000))
+        .build());
+    final NameNode sbn = dfsCluster.getNameNode(1);
+    final CacheManager annCachemanager = ann.getNamesystem().getCacheManager();
+    final CacheManager sbnCachemanager = sbn.getNamesystem().getCacheManager();
+    HATestUtil.waitForStandbyToCatchUp(ann, sbn);
+    GenericTestUtils.waitFor(() -> {
+      boolean isConsistence = false;
+      ann.getNamesystem().readLock();
+      try {
+        sbn.getNamesystem().readLock();
+        try {
+          Iterator<CacheDirective> annDirectivesIt = annCachemanager.
+              getCacheDirectives().iterator();
+          Iterator<CacheDirective> sbnDirectivesIt = sbnCachemanager.
+              getCacheDirectives().iterator();
+          if (annDirectivesIt.hasNext() && sbnDirectivesIt.hasNext()) {
+            CacheDirective annDirective = annDirectivesIt.next();
+            CacheDirective sbnDirective = sbnDirectivesIt.next();
+            if (annDirective.getExpiryTimeString().
+                equals(sbnDirective.getExpiryTimeString())) {
+              isConsistence = true;
+            }
+          }
+        } finally {
+          sbn.getNamesystem().readUnlock();
+        }
+      } finally {
+        ann.getNamesystem().readUnlock();
+      }
+      if (!isConsistence) {
+        LOG.info("testEexpiryTimeConsistency:"
+            + "ANN CacheDirective Status is inconsistent with SBN");
+      }
+      return isConsistence;
+    }, 500, 120000);
   }
 }

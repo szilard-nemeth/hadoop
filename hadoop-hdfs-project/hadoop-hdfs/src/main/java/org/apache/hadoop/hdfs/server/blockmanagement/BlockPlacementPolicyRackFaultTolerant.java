@@ -43,7 +43,9 @@ public class BlockPlacementPolicyRackFaultTolerant extends BlockPlacementPolicyD
     }
     // No calculation needed when there is only one rack or picking one node.
     int numOfRacks = clusterMap.getNumOfRacks();
-    if (numOfRacks == 1 || totalNumOfReplicas <= 1) {
+    // HDFS-14527 return default when numOfRacks = 0 to avoid
+    // ArithmeticException when calc maxNodesPerRack at following logic.
+    if (numOfRacks <= 1 || totalNumOfReplicas <= 1) {
       return new int[] {numOfReplicas, totalNumOfReplicas};
     }
     // If more racks than replicas, put one replica per rack.
@@ -235,9 +237,8 @@ public class BlockPlacementPolicyRackFaultTolerant extends BlockPlacementPolicyD
       // only one rack
       return new BlockPlacementStatusDefault(1, 1, 1);
     }
-    // 1. Check that all locations are different.
-    // 2. Count locations on different racks.
-    Set<String> racks = new TreeSet<>();
+    // Count locations on different racks.
+    Set<String> racks = new HashSet<>();
     for (DatanodeInfo dn : locs) {
       racks.add(dn.getNetworkLocation());
     }

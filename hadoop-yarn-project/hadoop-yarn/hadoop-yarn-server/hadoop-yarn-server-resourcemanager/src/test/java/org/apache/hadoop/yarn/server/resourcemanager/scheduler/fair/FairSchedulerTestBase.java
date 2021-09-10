@@ -17,8 +17,8 @@
  */
 package org.apache.hadoop.yarn.server.resourcemanager.scheduler.fair;
 
-import com.google.common.collect.Lists;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.util.Lists;
 import org.apache.hadoop.yarn.api.records.ApplicationAttemptId;
 import org.apache.hadoop.yarn.api.records.ApplicationId;
 import org.apache.hadoop.yarn.api.records.ApplicationSubmissionContext;
@@ -35,6 +35,7 @@ import org.apache.hadoop.yarn.server.resourcemanager.RMContext;
 import org.apache.hadoop.yarn.server.resourcemanager.ResourceManager;
 import org.apache.hadoop.yarn.server.resourcemanager.MockNodes;
 import org.apache.hadoop.yarn.server.resourcemanager.nodelabels.RMNodeLabelsManager;
+import org.apache.hadoop.yarn.server.resourcemanager.placement.ApplicationPlacementContext;
 import org.apache.hadoop.yarn.server.resourcemanager.rmnode.RMNode;
 import org.apache.hadoop.yarn.server.resourcemanager.rmapp.RMApp;
 import org.apache.hadoop.yarn.server.resourcemanager.rmapp.RMAppEvent;
@@ -177,7 +178,11 @@ public class FairSchedulerTestBase {
       Collection<ResourceRequest> requests, String queueId, String userId) {
     ApplicationAttemptId id =
         createAppAttemptId(this.APP_ID++, this.ATTEMPT_ID++);
-    scheduler.addApplication(id.getApplicationId(), queueId, userId, false);
+    // This fakes the placement which is not part of the scheduler anymore
+    ApplicationPlacementContext placementCtx =
+        new ApplicationPlacementContext(queueId);
+    scheduler.addApplication(id.getApplicationId(), queueId, userId, false,
+        placementCtx);
     // This conditional is for testAclSubmitApplication where app is rejected
     // and no app is added.
     if (scheduler.getSchedulerApplications()
@@ -212,10 +217,15 @@ public class FairSchedulerTestBase {
       String userId, List<ResourceRequest> ask) {
     ApplicationAttemptId id = createAppAttemptId(this.APP_ID++,
         this.ATTEMPT_ID++);
-    scheduler.addApplication(id.getApplicationId(), queueId, userId, false);
+    // This fakes the placement which is not part of the scheduler anymore
+    ApplicationPlacementContext placementCtx =
+        new ApplicationPlacementContext(queueId);
+    scheduler.addApplication(id.getApplicationId(), queueId, userId, false,
+        placementCtx);
     // This conditional is for testAclSubmitApplication where app is rejected
     // and no app is added.
-    if (scheduler.getSchedulerApplications().containsKey(id.getApplicationId())) {
+    if (scheduler.getSchedulerApplications().containsKey(
+        id.getApplicationId())) {
       scheduler.addApplicationAttempt(id, false, false);
     }
 
@@ -260,6 +270,30 @@ public class FairSchedulerTestBase {
     scheduler.update();
   }
 
+  protected ApplicationAttemptId createRecoveringApplication(
+      Resource amResource, String queueId, String userId) {
+    ApplicationAttemptId id =
+        createAppAttemptId(this.APP_ID++, this.ATTEMPT_ID++);
+
+    // On restore the app is already created but we need to check the AM
+    // resource, make sure it is set for test
+    ResourceRequest amRequest = createResourceRequest(
+        // cast to int as we're not testing large values so it is safe
+        (int)amResource.getMemorySize(), amResource.getVirtualCores(),
+        ResourceRequest.ANY, 1, 1, true);
+    List<ResourceRequest> amReqs = new ArrayList<>();
+    amReqs.add(amRequest);
+    createApplicationWithAMResourceInternal(id, queueId, userId, amResource,
+        amReqs);
+
+    // This fakes the placement which is not part of the scheduler anymore
+    ApplicationPlacementContext placementCtx =
+        new ApplicationPlacementContext(queueId);
+    scheduler.addApplication(id.getApplicationId(), queueId, userId, true,
+        placementCtx);
+    return id;
+  }
+
   protected void createApplicationWithAMResource(ApplicationAttemptId attId,
       String queue, String user, Resource amResource) {
     createApplicationWithAMResourceInternal(attId, queue, user, amResource,
@@ -283,11 +317,16 @@ public class FairSchedulerTestBase {
       Resource amResource, List<ResourceRequest> amReqs) {
     RMContext rmContext = resourceManager.getRMContext();
     ApplicationId appId = attId.getApplicationId();
+    // This fakes the placement which is not part of the scheduler anymore
+    ApplicationPlacementContext placementCtx =
+        new ApplicationPlacementContext(queue);
+    // Set the placement in the app and not just in the event in the next call
+    // otherwise with out of order event processing we might remove the app.
     RMApp rmApp = new RMAppImpl(appId, rmContext, conf, null, user, null,
         ApplicationSubmissionContext.newInstance(appId, null, queue, null,
             mock(ContainerLaunchContext.class), false, false, 0, amResource,
             null),
-        scheduler, null, 0, null, null, amReqs);
+        scheduler, null, 0, null, null, amReqs, placementCtx, -1);
     rmContext.getRMApps().put(appId, rmApp);
   }
 
@@ -298,8 +337,11 @@ public class FairSchedulerTestBase {
     resourceManager.getRMContext().getRMApps().get(appId).handle(event);
     event = new RMAppEvent(appId, RMAppEventType.APP_ACCEPTED);
     resourceManager.getRMContext().getRMApps().get(appId).handle(event);
+    // This fakes the placement which is not part of the scheduler anymore
+    ApplicationPlacementContext placementCtx =
+        new ApplicationPlacementContext(queue);
     AppAddedSchedulerEvent appAddedEvent = new AppAddedSchedulerEvent(
-        appId, queue, user);
+        appId, queue, user, placementCtx);
     scheduler.handle(appAddedEvent);
   }
 

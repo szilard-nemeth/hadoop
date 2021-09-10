@@ -44,6 +44,7 @@ import java.util.List;
 import java.util.Scanner;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.hadoop.HadoopIllegalArgumentException;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
@@ -62,6 +63,7 @@ import org.apache.hadoop.ipc.RemoteException;
 import org.apache.hadoop.test.GenericTestUtils;
 import org.apache.hadoop.test.LambdaTestUtils;
 import org.apache.hadoop.test.PathUtils;
+import org.apache.hadoop.util.Lists;
 import org.apache.hadoop.util.Tool;
 import org.apache.hadoop.util.ToolRunner;
 import org.junit.After;
@@ -69,8 +71,6 @@ import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
-
-import com.google.common.collect.Lists;
 
 /**
  * Tests various CLI commands of DiskBalancer.
@@ -382,6 +382,16 @@ public class TestDiskBalancerCommand {
     /* get full path of plan file*/
     final String planFileFullName = outputs.get(1);
     return planFileFullName;
+  }
+
+  /* test exception on invalid arguments */
+  @Test(timeout = 60000)
+  public void testExceptionOnInvalidArguments() throws Exception {
+    final String cmdLine = "hdfs diskbalancer random1 -report random2 random3";
+    thrown.expect(HadoopIllegalArgumentException.class);
+    thrown.expectMessage(
+        "Invalid or extra Arguments: [random1, random2, random3]");
+    runCommand(cmdLine);
   }
 
   /* test basic report */

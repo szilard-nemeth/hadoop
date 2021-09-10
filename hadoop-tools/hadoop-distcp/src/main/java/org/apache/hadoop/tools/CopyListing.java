@@ -35,7 +35,7 @@ import java.lang.reflect.Constructor;
 import java.net.URI;
 import java.util.Set;
 
-import com.google.common.collect.Sets;
+import org.apache.hadoop.util.Sets;
 
 /**
  * The CopyListing abstraction is responsible for how the list of
@@ -246,6 +246,29 @@ public abstract class CopyListing extends Configured {
    */
   protected Credentials getCredentials() {
     return credentials;
+  }
+
+  /**
+   * Returns the key for an entry in the copy listing sequence file.
+   * @param sourcePathRoot the root source path for determining the relative
+   *                       target path
+   * @param fileStatus the copy listing file status
+   * @return the key for the sequence file entry
+   */
+  protected Text getFileListingKey(Path sourcePathRoot,
+      CopyListingFileStatus fileStatus) {
+    return new Text(DistCpUtils.getRelativePath(sourcePathRoot,
+        fileStatus.getPath()));
+  }
+
+  /**
+   * Returns the value for an entry in the copy listing sequence file.
+   * @param fileStatus the copy listing file status
+   * @return the value for the sequence file entry
+   */
+  protected CopyListingFileStatus getFileListingValue(
+      CopyListingFileStatus fileStatus) {
+    return fileStatus;
   }
 
   /**

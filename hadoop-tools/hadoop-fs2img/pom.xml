@@ -17,12 +17,12 @@
   <parent>
     <groupId>org.apache.hadoop</groupId>
     <artifactId>hadoop-project</artifactId>
-    <version>3.3.0-SNAPSHOT</version>
+    <version>3.4.0-SNAPSHOT</version>
     <relativePath>../../hadoop-project</relativePath>
   </parent>
   <groupId>org.apache.hadoop</groupId>
   <artifactId>hadoop-fs2img</artifactId>
-  <version>3.3.0-SNAPSHOT</version>
+  <version>3.4.0-SNAPSHOT</version>
   <description>Apache Hadoop Image Generation Tool</description>
   <name>Apache Hadoop Image Generation Tool</name>
   <packaging>jar</packaging>
@@ -69,7 +69,6 @@
     <dependency>
       <groupId>org.assertj</groupId>
       <artifactId>assertj-core</artifactId>
-      <version>3.8.0</version>
       <scope>test</scope>
     </dependency>
   </dependencies>
@@ -88,14 +87,25 @@
         </configuration>
        </plugin>
       <plugin>
-        <groupId>org.codehaus.mojo</groupId>
-        <artifactId>findbugs-maven-plugin</artifactId>
+        <groupId>com.github.spotbugs</groupId>
+        <artifactId>spotbugs-maven-plugin</artifactId>
         <configuration>
-          <findbugsXmlOutput>true</findbugsXmlOutput>
           <xmlOutput>true</xmlOutput>
           <excludeFilterFile>${basedir}/dev-support/findbugs-exclude.xml</excludeFilterFile>
           <effort>Max</effort>
         </configuration>
+      </plugin>
+      <plugin>
+        <groupId>com.google.code.maven-replacer-plugin</groupId>
+        <artifactId>replacer</artifactId>
+        <executions>
+          <execution>
+            <id>replace-sources</id>
+            <configuration>
+              <skip>false</skip>
+            </configuration>
+          </execution>
+        </executions>
       </plugin>
     </plugins>
   </build>

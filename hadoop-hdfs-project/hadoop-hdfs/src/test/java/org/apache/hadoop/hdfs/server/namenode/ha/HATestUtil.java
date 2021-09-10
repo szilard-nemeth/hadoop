@@ -37,9 +37,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.LongAccumulator;
 
-import com.google.common.base.Function;
-import com.google.common.base.Joiner;
-import com.google.common.collect.Iterables;
+import org.apache.hadoop.thirdparty.com.google.common.base.Joiner;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -61,7 +59,7 @@ import org.apache.hadoop.io.retry.RetryInvocationHandler;
 import org.apache.hadoop.test.GenericTestUtils;
 import org.apache.hadoop.util.Time;
 
-import com.google.common.base.Supplier;
+import java.util.function.Supplier;
 
 /**
  * Static utility functions useful for testing HA.
@@ -276,33 +274,39 @@ public abstract class HATestUtil {
   /** Sets the required configurations for performing failover.  */
   public static void setFailoverConfigurations(MiniDFSCluster cluster,
       Configuration conf, String logicalName, int nsIndex) {
+    setFailoverConfigurations(cluster, conf, logicalName, nsIndex,
+        ConfiguredFailoverProxyProvider.class);
+  }
+
+  /** Sets the required configurations for performing failover.  */
+  public static <P extends FailoverProxyProvider<?>> void
+      setFailoverConfigurations(MiniDFSCluster cluster, Configuration conf,
+      String logicalName, int nsIndex, Class<P> classFPP) {
     MiniDFSCluster.NameNodeInfo[] nns = cluster.getNameNodeInfos(nsIndex);
     List<InetSocketAddress> nnAddresses = new ArrayList<InetSocketAddress>(3);
     for (MiniDFSCluster.NameNodeInfo nn : nns) {
       nnAddresses.add(nn.nameNode.getNameNodeAddress());
     }
-    setFailoverConfigurations(conf, logicalName, nnAddresses);
+    setFailoverConfigurations(conf, logicalName, nnAddresses, classFPP);
   }
 
   public static void setFailoverConfigurations(Configuration conf, String logicalName,
       InetSocketAddress ... nnAddresses){
-    setFailoverConfigurations(conf, logicalName, Arrays.asList(nnAddresses));
+    setFailoverConfigurations(conf, logicalName, Arrays.asList(nnAddresses),
+        ConfiguredFailoverProxyProvider.class);
   }
 
   /**
    * Sets the required configurations for performing failover
    */
-  public static void setFailoverConfigurations(Configuration conf,
-      String logicalName, List<InetSocketAddress> nnAddresses) {
-    setFailoverConfigurations(conf, logicalName,
-        Iterables.transform(nnAddresses, new Function<InetSocketAddress, String>() {
-
-          // transform the inet address to a simple string
-          @Override
-          public String apply(InetSocketAddress addr) {
-            return "hdfs://" + addr.getHostName() + ":" + addr.getPort();
-          }
-        }), ConfiguredFailoverProxyProvider.class);
+  public static <P extends FailoverProxyProvider<?>> void
+      setFailoverConfigurations(Configuration conf, String logicalName,
+      List<InetSocketAddress> nnAddresses, Class<P> classFPP) {
+    final List<String> addresses = new ArrayList();
+    nnAddresses.forEach(
+        addr -> addresses.add(
+            "hdfs://" + addr.getHostName() + ":" + addr.getPort()));
+    setFailoverConfigurations(conf, logicalName, addresses, classFPP);
   }
 
   public static <P extends FailoverProxyProvider<?>>
@@ -367,5 +371,17 @@ public abstract class HATestUtil {
     long currentStateId = lastSeenStateId.getThenReset();
     lastSeenStateId.accumulate(stateId);
     return currentStateId;
+  }
+
+  /**
+   * Get last seen stateId from the client AlignmentContext.
+   */
+  public static long getLastSeenStateId(DistributedFileSystem dfs)
+      throws Exception {
+    ObserverReadProxyProvider<?> provider = (ObserverReadProxyProvider<?>)
+        ((RetryInvocationHandler<?>) Proxy.getInvocationHandler(
+            dfs.getClient().getNamenode())).getProxyProvider();
+    ClientGSIContext ac = (ClientGSIContext)(provider.getAlignmentContext());
+    return ac.getLastSeenStateId();
   }
 }

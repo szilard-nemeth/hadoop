@@ -17,34 +17,6 @@
  */
 package org.apache.hadoop.hdfs.tools.offlineImageViewer;
 
-import com.google.common.base.Preconditions;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Lists;
-import org.apache.commons.lang3.StringUtils;
-import org.apache.commons.text.StringEscapeUtils;
-import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.fs.Path;
-import org.apache.hadoop.fs.permission.PermissionStatus;
-import org.apache.hadoop.hdfs.server.namenode.FSImageFormatPBINode;
-import org.apache.hadoop.hdfs.server.namenode.FSImageFormatProtobuf;
-import org.apache.hadoop.hdfs.server.namenode.FSImageFormatProtobuf.SectionName;
-import org.apache.hadoop.hdfs.server.namenode.FSImageUtil;
-import org.apache.hadoop.hdfs.server.namenode.FsImageProto;
-import org.apache.hadoop.hdfs.server.namenode.FsImageProto.FileSummary;
-import org.apache.hadoop.hdfs.server.namenode.FsImageProto.INodeSection;
-import org.apache.hadoop.hdfs.server.namenode.FsImageProto.INodeSection.INode;
-import org.apache.hadoop.hdfs.server.namenode.INodeId;
-import org.apache.hadoop.hdfs.server.namenode.SerialNumberManager;
-import org.apache.hadoop.io.IOUtils;
-import org.apache.hadoop.util.LimitInputStream;
-import org.apache.hadoop.util.Time;
-import org.fusesource.leveldbjni.JniDBFactory;
-import org.iq80.leveldb.DB;
-import org.iq80.leveldb.Options;
-import org.iq80.leveldb.WriteBatch;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.io.BufferedInputStream;
 import java.io.Closeable;
 import java.io.File;
@@ -63,6 +35,39 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+
+import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.text.StringEscapeUtils;
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.fs.XAttr;
+import org.apache.hadoop.fs.permission.PermissionStatus;
+import org.apache.hadoop.hdfs.protocol.HdfsConstants;
+import org.apache.hadoop.hdfs.server.blockmanagement.BlockStoragePolicySuite;
+import org.apache.hadoop.hdfs.server.namenode.FSImageFormatPBINode;
+import org.apache.hadoop.hdfs.server.namenode.FSImageFormatProtobuf;
+import org.apache.hadoop.hdfs.server.namenode.FSImageFormatProtobuf.SectionName;
+import org.apache.hadoop.hdfs.server.namenode.FSImageUtil;
+import org.apache.hadoop.hdfs.server.namenode.FsImageProto;
+import org.apache.hadoop.hdfs.server.namenode.FsImageProto.FileSummary;
+import org.apache.hadoop.hdfs.server.namenode.FsImageProto.INodeSection;
+import org.apache.hadoop.hdfs.server.namenode.FsImageProto.INodeSection.INode;
+import org.apache.hadoop.hdfs.server.namenode.INodeId;
+import org.apache.hadoop.hdfs.server.namenode.SerialNumberManager;
+import org.apache.hadoop.io.IOUtils;
+import org.apache.hadoop.util.LimitInputStream;
+import org.apache.hadoop.util.Lists;
+import org.apache.hadoop.util.Time;
+
+import org.fusesource.leveldbjni.JniDBFactory;
+import org.iq80.leveldb.DB;
+import org.iq80.leveldb.Options;
+import org.iq80.leveldb.WriteBatch;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
+import org.apache.hadoop.thirdparty.com.google.common.collect.ImmutableList;
 
 /**
  * This class reads the protobuf-based fsimage and generates text output
@@ -316,10 +321,10 @@ abstract class PBImageTextWriter implements Closeable {
       @Override
       public void close() throws IOException {
         if (batch != null) {
-          IOUtils.cleanup(null, batch);
+          IOUtils.cleanupWithLogger(null, batch);
           batch = null;
         }
-        IOUtils.cleanup(null, db);
+        IOUtils.cleanupWithLogger(null, db);
         db = null;
       }
 
@@ -385,13 +390,13 @@ abstract class PBImageTextWriter implements Closeable {
         dirMap = new LevelDBStore(new File(dbDir, "dirMap"));
       } catch (IOException e) {
         LOG.error("Failed to open LevelDBs", e);
-        IOUtils.cleanup(null, this);
+        IOUtils.cleanupWithLogger(null, this);
       }
     }
 
     @Override
     public void close() throws IOException {
-      IOUtils.cleanup(null, dirChildMap, dirMap);
+      IOUtils.cleanupWithLogger(null, dirChildMap, dirMap);
       dirChildMap = null;
       dirMap = null;
     }
@@ -512,7 +517,7 @@ abstract class PBImageTextWriter implements Closeable {
   @Override
   public void close() throws IOException {
     out.flush();
-    IOUtils.cleanup(null, metadataMap);
+    IOUtils.cleanupWithLogger(null, metadataMap);
   }
 
   void append(StringBuffer buffer, int field) {
@@ -804,5 +809,17 @@ abstract class PBImageTextWriter implements Closeable {
       LOG.debug("No snapshot name found for inode {}", inode);
     }
     return new IgnoreSnapshotException();
+  }
+
+  public int getStoragePolicy(
+      INodeSection.XAttrFeatureProto xattrFeatureProto) {
+    List<XAttr> xattrs =
+        FSImageFormatPBINode.Loader.loadXAttrs(xattrFeatureProto, stringTable);
+    for (XAttr xattr : xattrs) {
+      if (BlockStoragePolicySuite.isStoragePolicyXAttr(xattr)) {
+        return xattr.getValue()[0];
+      }
+    }
+    return HdfsConstants.BLOCK_STORAGE_POLICY_ID_UNSPECIFIED;
   }
 }

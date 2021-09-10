@@ -26,6 +26,7 @@ import java.util.Map.Entry;
 import java.util.SortedMap;
 import java.util.TreeMap;
 
+import org.apache.commons.lang3.builder.EqualsBuilder;
 import org.apache.commons.lang3.builder.HashCodeBuilder;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.fs.permission.FsPermission;
@@ -53,12 +54,16 @@ public abstract class MountTable extends BaseRecord {
       "Invalid entry, all mount points must start with / ";
   public static final String ERROR_MSG_NO_DEST_PATH_SPECIFIED =
       "Invalid entry, no destination paths specified ";
-  public static final String ERROR_MSG_INVAILD_DEST_NS =
+  public static final String ERROR_MSG_INVALID_DEST_NS =
       "Invalid entry, invalid destination nameservice ";
-  public static final String ERROR_MSG_INVAILD_DEST_PATH =
+  public static final String ERROR_MSG_INVALID_DEST_PATH =
       "Invalid entry, invalid destination path ";
   public static final String ERROR_MSG_ALL_DEST_MUST_START_WITH_BACK_SLASH =
       "Invalid entry, all destination must start with / ";
+  private static final String ERROR_MSG_FAULT_TOLERANT_MULTI_DEST =
+      "Invalid entry, fault tolerance requires multiple destinations ";
+  private static final String ERROR_MSG_FAULT_TOLERANT_ALL =
+      "Invalid entry, fault tolerance only supported for ALL order ";
 
   /** Comparator for paths which considers the /. */
   public static final Comparator<String> PATH_COMPARATOR =
@@ -144,7 +149,7 @@ public abstract class MountTable extends BaseRecord {
     // Set permission fields
     UserGroupInformation ugi = NameNode.getRemoteUser();
     record.setOwnerName(ugi.getShortUserName());
-    String group = ugi.getGroups().isEmpty() ? ugi.getShortUserName()
+    String group = ugi.getGroupsSet().isEmpty() ? ugi.getShortUserName()
         : ugi.getPrimaryGroupName();
     record.setGroupName(group);
     record.setMode(new FsPermission(
@@ -227,6 +232,20 @@ public abstract class MountTable extends BaseRecord {
    * @param order Order of the destinations.
    */
   public abstract void setDestOrder(DestinationOrder order);
+
+  /**
+   * Check if the mount point supports a failed destination.
+   *
+   * @return If it supports failures.
+   */
+  public abstract boolean isFaultTolerant();
+
+  /**
+   * Set if the mount point supports failed destinations.
+   *
+   * @param faultTolerant If it supports failures.
+   */
+  public abstract void setFaultTolerant(boolean faultTolerant);
 
   /**
    * Get owner name of this mount table entry.
@@ -321,10 +340,13 @@ public abstract class MountTable extends BaseRecord {
     List<RemoteLocation> destinations = this.getDestinations();
     sb.append(destinations);
     if (destinations != null && destinations.size() > 1) {
-      sb.append("[" + this.getDestOrder() + "]");
+      sb.append("[").append(this.getDestOrder()).append("]");
     }
     if (this.isReadOnly()) {
       sb.append("[RO]");
+    }
+    if (this.isFaultTolerant()) {
+      sb.append("[FT]");
     }
 
     if (this.getOwnerName() != null) {
@@ -372,15 +394,25 @@ public abstract class MountTable extends BaseRecord {
       String nsId = loc.getNameserviceId();
       if (nsId == null || nsId.length() == 0) {
         throw new IllegalArgumentException(
-            ERROR_MSG_INVAILD_DEST_NS + this);
+            ERROR_MSG_INVALID_DEST_NS + this);
       }
       if (loc.getDest() == null || loc.getDest().length() == 0) {
         throw new IllegalArgumentException(
-            ERROR_MSG_INVAILD_DEST_PATH + this);
+            ERROR_MSG_INVALID_DEST_PATH + this);
       }
       if (!loc.getDest().startsWith("/")) {
         throw new IllegalArgumentException(
             ERROR_MSG_ALL_DEST_MUST_START_WITH_BACK_SLASH + this);
+      }
+    }
+    if (isFaultTolerant()) {
+      if (getDestinations().size() < 2) {
+        throw new IllegalArgumentException(
+            ERROR_MSG_FAULT_TOLERANT_MULTI_DEST + this);
+      }
+      if (!isAll()) {
+        throw new IllegalArgumentException(
+            ERROR_MSG_FAULT_TOLERANT_ALL + this);
       }
     }
   }
@@ -397,6 +429,9 @@ public abstract class MountTable extends BaseRecord {
         .append(this.getDestinations())
         .append(this.isReadOnly())
         .append(this.getDestOrder())
+        .append(this.isFaultTolerant())
+        .append(this.getQuota().getQuota())
+        .append(this.getQuota().getSpaceQuota())
         .toHashCode();
   }
 
@@ -404,16 +439,16 @@ public abstract class MountTable extends BaseRecord {
   public boolean equals(Object obj) {
     if (obj instanceof MountTable) {
       MountTable other = (MountTable)obj;
-      if (!this.getSourcePath().equals(other.getSourcePath())) {
-        return false;
-      } else if (!this.getDestinations().equals(other.getDestinations())) {
-        return false;
-      } else if (this.isReadOnly() != other.isReadOnly()) {
-        return false;
-      } else if (!this.getDestOrder().equals(other.getDestOrder())) {
-        return false;
-      }
-      return true;
+      return new EqualsBuilder()
+          .append(this.getSourcePath(), other.getSourcePath())
+          .append(this.getDestinations(), other.getDestinations())
+          .append(this.isReadOnly(), other.isReadOnly())
+          .append(this.getDestOrder(), other.getDestOrder())
+          .append(this.isFaultTolerant(), other.isFaultTolerant())
+          .append(this.getQuota().getQuota(), other.getQuota().getQuota())
+          .append(this.getQuota().getSpaceQuota(),
+              other.getQuota().getSpaceQuota())
+          .isEquals();
     }
     return false;
   }
@@ -424,9 +459,7 @@ public abstract class MountTable extends BaseRecord {
    */
   public boolean isAll() {
     DestinationOrder order = getDestOrder();
-    return order == DestinationOrder.HASH_ALL ||
-        order == DestinationOrder.RANDOM ||
-        order == DestinationOrder.SPACE;
+    return DestinationOrder.FOLDER_ALL.contains(order);
   }
 
   /**

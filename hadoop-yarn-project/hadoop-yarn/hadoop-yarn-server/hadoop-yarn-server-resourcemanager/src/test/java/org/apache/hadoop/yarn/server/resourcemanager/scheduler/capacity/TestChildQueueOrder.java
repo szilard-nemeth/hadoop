@@ -29,11 +29,8 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
-import java.util.HashMap;
-import java.util.Map;
-
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.hadoop.yarn.api.records.ApplicationAttemptId;
 import org.apache.hadoop.yarn.api.records.Container;
 import org.apache.hadoop.yarn.api.records.ContainerId;
@@ -70,7 +67,8 @@ import org.mockito.stubbing.Answer;
 
 public class TestChildQueueOrder {
 
-  private static final Log LOG = LogFactory.getLog(TestChildQueueOrder.class);
+  private static final Logger LOG =
+      LoggerFactory.getLogger(TestChildQueueOrder.class);
 
   RMContext rmContext;
   YarnConfiguration conf;
@@ -130,7 +128,7 @@ public class TestChildQueueOrder {
         try {
           throw new Exception();
         } catch (Exception e) {
-          LOG.info("FOOBAR q.assignContainers q=" + queue.getQueueName() + 
+          LOG.info("FOOBAR q.assignContainers q=" + queue.getQueuePath() +
               " alloc=" + allocation + " node=" + node.getNodeName());
         }
         final Resource allocatedResource = Resources.createResource(allocation);
@@ -221,8 +219,8 @@ public class TestChildQueueOrder {
   public void testSortedQueues() throws Exception {
     // Setup queue configs
     setupSortedQueues(csConf);
-    Map<String, CSQueue> queues = new HashMap<String, CSQueue>();
-    CSQueue root = 
+    CSQueueStore queues = new CSQueueStore();
+    CSQueue root =
         CapacitySchedulerQueueManager.parseQueue(csContext, csConf, null,
           CapacitySchedulerConfiguration.ROOT, queues, queues, 
           TestUtils.spyHook);

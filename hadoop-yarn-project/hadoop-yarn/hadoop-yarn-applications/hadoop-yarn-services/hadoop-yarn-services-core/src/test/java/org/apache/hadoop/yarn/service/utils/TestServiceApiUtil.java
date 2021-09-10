@@ -45,10 +45,13 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.apache.hadoop.test.LambdaTestUtils.intercept;
 import static org.apache.hadoop.yarn.service.conf.RestApiConstants.DEFAULT_UNLIMITED_LIFETIME;
 import static org.apache.hadoop.yarn.service.exceptions.RestApiErrorMessages.*;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.fail;
 
 /**
  * Test for ServiceApiUtil helper methods.
@@ -268,7 +271,7 @@ public class TestServiceApiUtil extends ServiceTestUtils {
       Assert.fail(NO_EXCEPTION_PREFIX + e.getMessage());
     }
 
-    assertEquals(app.getLifetime(), DEFAULT_UNLIMITED_LIFETIME);
+    assertThat(app.getLifetime()).isEqualTo(DEFAULT_UNLIMITED_LIFETIME);
   }
 
   private static Resource createValidResource() {
@@ -553,33 +556,11 @@ public class TestServiceApiUtil extends ServiceTestUtils {
     // Set the scope
     pc.setScope(PlacementScope.NODE);
 
-    try {
-      ServiceApiUtil.validateAndResolveService(app, sfs, CONF_DNS_ENABLED);
-      Assert.fail(EXCEPTION_PREFIX + "constraint with no tag(s)");
-    } catch (IllegalArgumentException e) {
-      assertEquals(String.format(
-          RestApiErrorMessages.ERROR_PLACEMENT_POLICY_CONSTRAINT_TAGS_NULL,
-          "CA1 ", "comp-a"), e.getMessage());
-    }
-
-    // Set a target tag - but an invalid one
-    pc.setTargetTags(Collections.singletonList("comp-invalid"));
-
-    try {
-      ServiceApiUtil.validateAndResolveService(app, sfs, CONF_DNS_ENABLED);
-      Assert.fail(EXCEPTION_PREFIX + "constraint with invalid tag name");
-    } catch (IllegalArgumentException e) {
-      assertEquals(
-          String.format(
-              RestApiErrorMessages.ERROR_PLACEMENT_POLICY_TAG_NAME_NOT_SAME,
-              "comp-invalid", "comp-a", "comp-a", "comp-a"),
-          e.getMessage());
-    }
-
-    // Set valid target tags now
+    // Target tag is optional.
     pc.setTargetTags(Collections.singletonList("comp-a"));
 
-    // Finally it should succeed
+    // Validation can succeed for any arbitrary target, only scheduler knows
+    // if the target tag is valid.
     try {
       ServiceApiUtil.validateAndResolveService(app, sfs, CONF_DNS_ENABLED);
     } catch (IllegalArgumentException e) {
@@ -763,6 +744,21 @@ public class TestServiceApiUtil extends ServiceTestUtils {
     } catch (InterruptedException e) {
     }
     Assert.assertTrue(thread.isAlive());
+  }
+
+  @Test
+  public void testJvmOpts() throws Exception {
+    String invalidJvmOpts = "`ping -c 3 example.com`";
+    intercept(IllegalArgumentException.class,
+        "Invalid character in yarn.service.am.java.opts.",
+        () -> ServiceApiUtil.validateJvmOpts(invalidJvmOpts));
+    String validJvmOpts = "-Dyarn.service.am.java.opts=-Xmx768m "
+        + "-Djava.security.auth.login.config=/opt/hadoop/etc/jaas-zk.conf";
+    try {
+      ServiceApiUtil.validateJvmOpts(validJvmOpts);
+    } catch (Exception ex) {
+      fail("Invalid character in yarn.service.am.java.opts.");
+    }
   }
 
   public static Service createExampleApplication() {

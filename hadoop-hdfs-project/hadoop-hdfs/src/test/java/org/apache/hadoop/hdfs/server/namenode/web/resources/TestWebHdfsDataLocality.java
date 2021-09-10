@@ -45,11 +45,11 @@ import org.apache.hadoop.hdfs.web.WebHdfsTestUtil;
 import org.apache.hadoop.hdfs.web.resources.GetOpParam;
 import org.apache.hadoop.hdfs.web.resources.PostOpParam;
 import org.apache.hadoop.hdfs.web.resources.PutOpParam;
-import org.apache.log4j.Level;
 import org.junit.Assert;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.ExpectedException;
+import org.slf4j.event.Level;
 
 /**
  * Test WebHDFS which provides data locality using HTTP redirection.
@@ -58,7 +58,7 @@ public class TestWebHdfsDataLocality {
   static final Logger LOG =
       LoggerFactory.getLogger(TestWebHdfsDataLocality.class);
   {
-    DFSTestUtil.setNameNodeLogLevel(Level.ALL);
+    DFSTestUtil.setNameNodeLogLevel(Level.TRACE);
   }
   
   private static final String RACK0 = "/rack0";
@@ -234,6 +234,29 @@ public class TestWebHdfsDataLocality {
         
         sb.append(",");
       }
+    } finally {
+      cluster.shutdown();
+    }
+  }
+
+  @Test
+  public void testExcludeWrongDataNode() throws Exception {
+    final Configuration conf = WebHdfsTestUtil.createConf();
+    final String[] racks = {RACK0};
+    final String[] hosts = {"DataNode1"};
+    final int nDataNodes = hosts.length;
+
+    final MiniDFSCluster cluster = new MiniDFSCluster.Builder(conf)
+        .hosts(hosts).numDataNodes(nDataNodes).racks(racks).build();
+    try {
+      cluster.waitActive();
+      final NameNode namenode = cluster.getNameNode();
+      NamenodeWebHdfsMethods.chooseDatanode(
+          namenode, "/path", PutOpParam.Op.CREATE, 0,
+          DFSConfigKeys.DFS_BLOCK_SIZE_DEFAULT,
+          "DataNode2", LOCALHOST, null);
+    } catch (Exception e) {
+      Assert.fail("Failed to exclude DataNode2" + e.getMessage());
     } finally {
       cluster.shutdown();
     }

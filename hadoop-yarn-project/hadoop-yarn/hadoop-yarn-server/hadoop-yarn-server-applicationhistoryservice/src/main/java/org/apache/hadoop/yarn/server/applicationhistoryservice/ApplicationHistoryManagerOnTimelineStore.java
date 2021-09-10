@@ -64,10 +64,10 @@ import org.apache.hadoop.yarn.server.security.ApplicationACLsManager;
 import org.apache.hadoop.yarn.server.timeline.NameValuePair;
 import org.apache.hadoop.yarn.server.timeline.TimelineDataManager;
 import org.apache.hadoop.yarn.server.timeline.TimelineReader.Field;
-import org.apache.hadoop.yarn.util.ConverterUtils;
+import org.apache.hadoop.yarn.util.Apps;
 import org.apache.hadoop.yarn.webapp.util.WebAppUtils;
 
-import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -250,6 +250,7 @@ public class ApplicationHistoryManagerOnTimelineStore extends AbstractService
     String type = null;
     boolean unmanagedApplication = false;
     long createdTime = 0;
+    long launchTime = 0;
     long submittedTime = 0;
     long finishedTime = 0;
     float progress = 0.0f;
@@ -379,6 +380,9 @@ public class ApplicationHistoryManagerOnTimelineStore extends AbstractService
             ApplicationMetricsConstants.CREATED_EVENT_TYPE)) {
           createdTime = event.getTimestamp();
         } else if (event.getEventType().equals(
+            ApplicationMetricsConstants.LAUNCHED_EVENT_TYPE)) {
+          launchTime = event.getTimestamp();
+        } else if (event.getEventType().equals(
             ApplicationMetricsConstants.UPDATED_EVENT_TYPE)) {
           // This type of events are parsed in time-stamp descending order
           // which means the previous event could override the information
@@ -408,7 +412,7 @@ public class ApplicationHistoryManagerOnTimelineStore extends AbstractService
           }
           if (eventInfo.containsKey(
               ApplicationMetricsConstants.STATE_EVENT_INFO)) {
-            if (!isFinalState(state)) {
+            if (!Apps.isApplicationFinalState(state)) {
               state = YarnApplicationState.valueOf(eventInfo.get(
                   ApplicationMetricsConstants.STATE_EVENT_INFO).toString());
             }
@@ -454,7 +458,8 @@ public class ApplicationHistoryManagerOnTimelineStore extends AbstractService
     return new ApplicationReportExt(ApplicationReport.newInstance(
         ApplicationId.fromString(entity.getEntityId()),
         latestApplicationAttemptId, user, queue, name, null, -1, null, state,
-        diagnosticsInfo, null, createdTime, submittedTime, 0, finishedTime,
+        diagnosticsInfo, null, createdTime,
+        submittedTime, launchTime, finishedTime,
         finalStatus, appResources, null, progress, type, null, appTags,
         unmanagedApplication, Priority.newInstance(applicationPriority),
         appNodeLabelExpression, amNodeLabelExpression), appViewACLs);
@@ -468,12 +473,6 @@ public class ApplicationHistoryManagerOnTimelineStore extends AbstractService
       result = Long.parseLong(infoValue.toString());
     }
     return result;
-  }
-
-  private static boolean isFinalState(YarnApplicationState state) {
-    return state == YarnApplicationState.FINISHED
-        || state == YarnApplicationState.FAILED
-        || state == YarnApplicationState.KILLED;
   }
 
   private static ApplicationAttemptReport convertToApplicationAttemptReport(

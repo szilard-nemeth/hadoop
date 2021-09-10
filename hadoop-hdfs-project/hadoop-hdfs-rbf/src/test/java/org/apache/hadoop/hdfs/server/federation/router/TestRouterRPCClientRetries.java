@@ -54,7 +54,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.Timeout;
 
-import com.google.common.base.Supplier;
+import java.util.function.Supplier;
 
 /**
  * Test retry behavior of the Router RPC Client.
@@ -81,7 +81,7 @@ public class TestRouterRPCClientRetries {
         .rpc()
         .build();
     routerConf.setTimeDuration(
-        NamenodeBeanMetrics.DN_REPORT_CACHE_EXPIRE, 1, TimeUnit.SECONDS);
+        RBFConfigKeys.DN_REPORT_CACHE_EXPIRE, 1, TimeUnit.SECONDS);
 
     // reduce IPC client connection retry times and interval time
     Configuration clientConf = new Configuration(false);
@@ -133,7 +133,7 @@ public class TestRouterRPCClientRetries {
     } catch (RemoteException e) {
       String ns0 = cluster.getNameservices().get(0);
       assertExceptionContains(
-          "No namenode available under nameservice " + ns0, e);
+          "No namenodes available under nameservice " + ns0, e);
     }
 
     // Verify the retry times, it should only retry one time.
@@ -173,7 +173,7 @@ public class TestRouterRPCClientRetries {
     NamenodeStatusReport report = new NamenodeStatusReport(ns0,
         nnInfo.getNamenodeId(), nnInfo.getRpcAddress(),
         nnInfo.getServiceAddress(), nnInfo.getLifelineAddress(),
-        nnInfo.getWebAddress());
+        nnInfo.getWebScheme(), nnInfo.getWebAddress());
     report.setRegistrationValid(false);
     assertTrue(resolver.registerNamenode(report));
     resolver.loadCache(true);

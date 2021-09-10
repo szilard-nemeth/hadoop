@@ -50,8 +50,8 @@ import org.apache.hadoop.yarn.server.resourcemanager.webapp.DeSelectFields.DeSel
 import org.apache.hadoop.yarn.util.Times;
 import org.apache.hadoop.yarn.webapp.util.WebAppUtils;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.base.Joiner;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.base.Joiner;
 
 @XmlRootElement(name = "app")
 @XmlAccessorType(XmlAccessType.FIELD)
@@ -388,6 +388,10 @@ public class AppInfo {
 
   public String getNote() {
     return this.diagnostics;
+  }
+
+  public void setNote(String diagnosticsMsg) {
+    this.diagnostics = diagnosticsMsg;
   }
 
   public FinalApplicationStatus getFinalStatus() {

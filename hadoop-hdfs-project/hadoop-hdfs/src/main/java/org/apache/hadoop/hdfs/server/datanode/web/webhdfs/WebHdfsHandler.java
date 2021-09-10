@@ -17,7 +17,7 @@
  */
 package org.apache.hadoop.hdfs.server.datanode.web.webhdfs;
 
-import com.google.common.base.Preconditions;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
@@ -58,7 +58,6 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.security.PrivilegedExceptionAction;
 import java.util.EnumSet;
@@ -128,7 +127,7 @@ public class WebHdfsHandler extends SimpleChannelInboundHandler<HttpRequest> {
     params = new ParameterParser(queryString, conf);
     DataNodeUGIProvider ugiProvider = new DataNodeUGIProvider(params);
     ugi = ugiProvider.ugi();
-    path = URLDecoder.decode(params.path(), "UTF-8");
+    path = params.path();
 
     injectToken();
     ugi.doAs(new PrivilegedExceptionAction<Void>() {
@@ -336,8 +335,8 @@ public class WebHdfsHandler extends SimpleChannelInboundHandler<HttpRequest> {
   }
 
   private void injectToken() throws IOException {
-    if (UserGroupInformation.isSecurityEnabled()) {
-      Token<DelegationTokenIdentifier> token = params.delegationToken();
+    Token<DelegationTokenIdentifier> token = params.delegationToken();
+    if (UserGroupInformation.isSecurityEnabled() && token != null) {
       token.setKind(HDFS_DELEGATION_KIND);
       ugi.addToken(token);
     }

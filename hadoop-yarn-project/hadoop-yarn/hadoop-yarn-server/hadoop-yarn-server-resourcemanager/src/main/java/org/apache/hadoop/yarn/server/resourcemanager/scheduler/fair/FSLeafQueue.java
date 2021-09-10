@@ -29,9 +29,9 @@ import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.TreeSet;
 
-import com.google.common.annotations.VisibleForTesting;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.hadoop.classification.InterfaceAudience.Private;
 import org.apache.hadoop.classification.InterfaceStability.Unstable;
 import org.apache.hadoop.security.UserGroupInformation;
@@ -51,7 +51,8 @@ import static org.apache.hadoop.yarn.util.resource.Resources.none;
 @Private
 @Unstable
 public class FSLeafQueue extends FSQueue {
-  private static final Log LOG = LogFactory.getLog(FSLeafQueue.class.getName());
+  private static final Logger LOG = LoggerFactory.
+      getLogger(FSLeafQueue.class.getName());
   private static final List<FSQueue> EMPTY_LIST = Collections.emptyList();
 
   private FSContext context;
@@ -351,10 +352,18 @@ public class FSLeafQueue extends FSQueue {
         continue;
       }
       assigned = sched.assignContainer(node);
-      if (!assigned.equals(none())) {
-        if (LOG.isDebugEnabled()) {
-          LOG.debug("Assigned container in queue:" + getName() + " " +
-              "container:" + assigned);
+
+      boolean isContainerAssignedOrReserved = !assigned.equals(none());
+      boolean isContainerReserved =
+                assigned.equals(FairScheduler.CONTAINER_RESERVED);
+
+      // check if an assignment or a reservation was made.
+      if (isContainerAssignedOrReserved) {
+        // only log container assignment if there was an actual allocation,
+        // not a reservation.
+        if (!isContainerReserved && LOG.isDebugEnabled()) {
+          LOG.debug("Assigned container in queue:{} container:{}",
+              getName(), assigned);
         }
         break;
       }
@@ -505,17 +514,22 @@ public class FSLeafQueue extends FSQueue {
   */
   private Resource computeMaxAMResource() {
     Resource maxResource = Resources.clone(getFairShare());
+    Resource maxShare = getMaxShare();
+
     if (maxResource.getMemorySize() == 0) {
       maxResource.setMemorySize(
           Math.min(scheduler.getRootQueueMetrics().getAvailableMB(),
-                   getMaxShare().getMemorySize()));
+                   maxShare.getMemorySize()));
     }
 
     if (maxResource.getVirtualCores() == 0) {
       maxResource.setVirtualCores(Math.min(
           scheduler.getRootQueueMetrics().getAvailableVirtualCores(),
-          getMaxShare().getVirtualCores()));
+          maxShare.getVirtualCores()));
     }
+
+    scheduler.getRootQueueMetrics()
+        .fillInValuesFromAvailableResources(maxShare, maxResource);
 
     // Round up to allow AM to run when there is only one vcore on the cluster
     return Resources.multiplyAndRoundUp(maxResource, maxAMShare);

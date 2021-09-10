@@ -87,7 +87,7 @@ import org.apache.hadoop.yarn.util.Clock;
 import org.apache.hadoop.yarn.util.RackResolver;
 import org.apache.hadoop.yarn.util.resource.Resources;
 
-import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -968,16 +968,20 @@ public class RMContainerAllocator extends RMContainerRequestor
 
   @VisibleForTesting
   public TaskAttemptEvent createContainerFinishedEvent(ContainerStatus cont,
-      TaskAttemptId attemptID) {
-    if (cont.getExitStatus() == ContainerExitStatus.ABORTED
-        || cont.getExitStatus() == ContainerExitStatus.PREEMPTED) {
-      // killed by framework
-      return new TaskAttemptEvent(attemptID,
-          TaskAttemptEventType.TA_KILL);
-    } else {
-      return new TaskAttemptEvent(attemptID,
+      TaskAttemptId attemptId) {
+    TaskAttemptEvent event;
+    switch (cont.getExitStatus()) {
+    case ContainerExitStatus.ABORTED:
+    case ContainerExitStatus.PREEMPTED:
+    case ContainerExitStatus.KILLED_BY_CONTAINER_SCHEDULER:
+      // killed by YARN
+      event = new TaskAttemptEvent(attemptId, TaskAttemptEventType.TA_KILL);
+      break;
+    default:
+      event = new TaskAttemptEvent(attemptId,
           TaskAttemptEventType.TA_CONTAINER_COMPLETED);
     }
+    return event;
   }
   
   @SuppressWarnings("unchecked")

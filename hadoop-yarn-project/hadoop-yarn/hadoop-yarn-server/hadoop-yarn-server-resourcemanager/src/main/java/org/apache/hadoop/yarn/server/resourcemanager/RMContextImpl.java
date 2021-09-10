@@ -22,8 +22,8 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.concurrent.ConcurrentMap;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.hadoop.classification.InterfaceAudience.Private;
 import org.apache.hadoop.classification.InterfaceStability.Unstable;
 import org.apache.hadoop.conf.Configuration;
@@ -66,7 +66,7 @@ import org.apache.hadoop.yarn.server.resourcemanager.volume.csi.VolumeManager;
 import org.apache.hadoop.yarn.server.webproxy.ProxyUriUtils;
 import org.apache.hadoop.yarn.util.Clock;
 
-import com.google.common.annotations.VisibleForTesting;
+import org.apache.hadoop.thirdparty.com.google.common.annotations.VisibleForTesting;
 import org.apache.hadoop.yarn.webapp.util.WebAppUtils;
 
 /**
@@ -83,7 +83,8 @@ import org.apache.hadoop.yarn.webapp.util.WebAppUtils;
  */
 public class RMContextImpl implements RMContext {
 
-  private static final Log LOG = LogFactory.getLog(RMContextImpl.class);
+  private static final Logger LOG =
+      LoggerFactory.getLogger(RMContextImpl.class);
   private static final String UNAVAILABLE = "N/A";
   /**
    * RM service contexts which runs through out RM life span. These are created

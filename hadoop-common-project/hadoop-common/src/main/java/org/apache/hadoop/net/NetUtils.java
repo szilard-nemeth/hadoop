@@ -37,12 +37,18 @@ import java.net.URISyntaxException;
 import java.net.UnknownHostException;
 import java.net.ConnectException;
 import java.nio.channels.SocketChannel;
+import java.nio.channels.UnresolvedAddressException;
 import java.util.Map.Entry;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
 import javax.net.SocketFactory;
+
+import org.apache.hadoop.security.AccessControlException;
+import org.apache.hadoop.thirdparty.com.google.common.cache.Cache;
+import org.apache.hadoop.thirdparty.com.google.common.cache.CacheBuilder;
 
 import org.apache.commons.net.util.SubnetUtils;
 import org.apache.commons.net.util.SubnetUtils.SubnetInfo;
@@ -55,7 +61,7 @@ import org.apache.hadoop.ipc.VersionedProtocol;
 import org.apache.hadoop.security.SecurityUtil;
 import org.apache.hadoop.util.ReflectionUtils;
 
-import com.google.common.base.Preconditions;
+import org.apache.hadoop.thirdparty.com.google.common.base.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -176,11 +182,33 @@ public class NetUtils {
    *                    include a port number
    * @param configName the name of the configuration from which
    *                   <code>target</code> was loaded. This is used in the
-   *                   exception message in the case that parsing fails. 
+   *                   exception message in the case that parsing fails.
    */
   public static InetSocketAddress createSocketAddr(String target,
                                                    int defaultPort,
                                                    String configName) {
+    return createSocketAddr(target, defaultPort, configName, false);
+  }
+
+  /**
+   * Create an InetSocketAddress from the given target string and
+   * default port. If the string cannot be parsed correctly, the
+   * <code>configName</code> parameter is used as part of the
+   * exception message, allowing the user to better diagnose
+   * the misconfiguration.
+   *
+   * @param target a string of either "host" or "host:port"
+   * @param defaultPort the default port if <code>target</code> does not
+   *                    include a port number
+   * @param configName the name of the configuration from which
+   *                   <code>target</code> was loaded. This is used in the
+   *                   exception message in the case that parsing fails.
+   * @param useCacheIfPresent Whether use cache when create URI
+   */
+  public static InetSocketAddress createSocketAddr(String target,
+                                                   int defaultPort,
+                                                   String configName,
+                                                   boolean useCacheIfPresent) {
     String helpText = "";
     if (configName != null) {
       helpText = " (configuration property '" + configName + "')";
@@ -190,15 +218,8 @@ public class NetUtils {
           helpText);
     }
     target = target.trim();
-    boolean hasScheme = target.contains("://");    
-    URI uri = null;
-    try {
-      uri = hasScheme ? URI.create(target) : URI.create("dummyscheme://"+target);
-    } catch (IllegalArgumentException e) {
-      throw new IllegalArgumentException(
-          "Does not contain a valid host:port authority: " + target + helpText
-      );
-    }
+    boolean hasScheme = target.contains("://");
+    URI uri = createURI(target, hasScheme, helpText, useCacheIfPresent);
 
     String host = uri.getHost();
     int port = uri.getPort();
@@ -206,15 +227,48 @@ public class NetUtils {
       port = defaultPort;
     }
     String path = uri.getPath();
-    
+
     if ((host == null) || (port < 0) ||
-        (!hasScheme && path != null && !path.isEmpty()))
-    {
+        (!hasScheme && path != null && !path.isEmpty())) {
       throw new IllegalArgumentException(
           "Does not contain a valid host:port authority: " + target + helpText
       );
     }
     return createSocketAddrForHost(host, port);
+  }
+
+  private static final long URI_CACHE_SIZE_DEFAULT = 1000;
+  private static final long URI_CACHE_EXPIRE_TIME_DEFAULT = 12;
+  private static final Cache<String, URI> URI_CACHE = CacheBuilder.newBuilder()
+      .maximumSize(URI_CACHE_SIZE_DEFAULT)
+      .expireAfterWrite(URI_CACHE_EXPIRE_TIME_DEFAULT, TimeUnit.HOURS)
+      .build();
+
+  private static URI createURI(String target,
+                               boolean hasScheme,
+                               String helpText,
+                               boolean useCacheIfPresent) {
+    URI uri;
+    if (useCacheIfPresent) {
+      uri = URI_CACHE.getIfPresent(target);
+      if (uri != null) {
+        return uri;
+      }
+    }
+
+    try {
+      uri = hasScheme ? URI.create(target) :
+              URI.create("dummyscheme://" + target);
+    } catch (IllegalArgumentException e) {
+      throw new IllegalArgumentException(
+          "Does not contain a valid host:port authority: " + target + helpText
+      );
+    }
+
+    if (useCacheIfPresent) {
+      URI_CACHE.put(target, uri);
+    }
+    return uri;
   }
 
   /**
@@ -288,8 +342,10 @@ public class NetUtils {
     if (fqHost == null) {
       try {
         fqHost = SecurityUtil.getByName(host).getHostName();
-        // slight race condition, but won't hurt
         canonicalizedHostCache.putIfAbsent(host, fqHost);
+        // ensures that we won't return a canonicalized stale (non-cached)
+        // host name for a given host
+        fqHost = canonicalizedHostCache.get(host);
       } catch (UnknownHostException e) {
         fqHost = host;
       }
@@ -532,6 +588,8 @@ public class NetUtils {
       }
     } catch (SocketTimeoutException ste) {
       throw new ConnectTimeoutException(ste.getMessage());
+    }  catch (UnresolvedAddressException uae) {
+      throw new UnknownHostException(endpoint.toString());
     }
 
     // There is a very rare case allowed by the TCP specification, such that
@@ -634,6 +692,22 @@ public class NetUtils {
     } catch (UnknownHostException e) {
       return null;
     }
+  }
+
+  /**
+   * Attempt to normalize the given string to "host:port"
+   * if it like "ip:port".
+   *
+   * @param ipPort maybe lik ip:port or host:port.
+   * @return host:port
+   */
+  public static String normalizeIP2HostName(String ipPort) {
+    if (null == ipPort || !ipPortPattern.matcher(ipPort).matches()) {
+      return ipPort;
+    }
+
+    InetSocketAddress address = createSocketAddr(ipPort);
+    return getHostPortString(address);
   }
 
   /**
@@ -801,8 +875,17 @@ public class NetUtils {
                 + " failed on socket exception: " + exception
                 + ";"
                 + see("SocketException"));
+      } else if (exception instanceof AccessControlException) {
+        return wrapWithMessage(exception,
+            "Call From "
+                + localHost + " to " + destHost + ":" + destPort
+                + " failed: " + exception.getMessage());
       } else {
-        // Return instance of same type if Exception has a String constructor
+        // 1. Return instance of same type with exception msg if Exception has a
+        // String constructor.
+        // 2. Return instance of same type if Exception doesn't have a String
+        // constructor.
+        // Related HADOOP-16453.
         return wrapWithMessage(exception,
             "DestHost:destPort " + destHost + ":" + destPort
                 + " , LocalHost:localPort " + localHost
@@ -830,9 +913,9 @@ public class NetUtils {
       Constructor<? extends Throwable> ctor = clazz.getConstructor(String.class);
       Throwable t = ctor.newInstance(msg);
       return (T)(t.initCause(exception));
+    } catch (NoSuchMethodException e) {
+      return exception;
     } catch (Throwable e) {
-      LOG.warn("Unable to wrap exception of type {}: it has no (String) "
-          + "constructor", clazz, e);
       throw exception;
     }
   }
