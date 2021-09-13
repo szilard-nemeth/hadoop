@@ -121,7 +121,7 @@ public abstract class AbstractCSQueue implements CSQueue {
   private CSQueuePreemption preemptionSettings;
 =======
   
-  private AbstractCSQueueUsageTracker usageTracker;
+  AbstractCSQueueUsageTracker usageTracker;
 >>>>>>> initial commit of YARN-10942
 
   public enum CapacityConfigType {
