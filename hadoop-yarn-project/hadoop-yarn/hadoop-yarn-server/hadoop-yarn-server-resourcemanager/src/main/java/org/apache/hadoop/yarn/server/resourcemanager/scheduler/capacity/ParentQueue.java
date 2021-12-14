@@ -354,7 +354,7 @@ public class ParentQueue extends AbstractCSQueue {
             if (Math.abs(childrenPctSum) > PRECISION) {
               // It is wrong when percent sum != {0, 1}
               throw new IOException(
-                  "Illegal" + " capacity sum of " + childrenPctSum
+                  "Illegal capacity sum of " + childrenPctSum
                       + " for children of queue " + queueName + " for label="
                       + nodeLabel + ". It should be either 0 or 1.0");
             } else{
@@ -367,7 +367,7 @@ public class ParentQueue extends AbstractCSQueue {
                 if ((Math.abs(queueCapacities.getCapacity(nodeLabel))
                     > PRECISION) && (!allowZeroCapacitySum)) {
                   throw new IOException(
-                      "Illegal" + " capacity sum of " + childrenPctSum
+                      "Illegal capacity sum of " + childrenPctSum
                           + " for children of queue " + queueName
                           + " for label=" + nodeLabel
                           + ". It is set to 0, but parent percent != 0, and "
@@ -382,7 +382,7 @@ public class ParentQueue extends AbstractCSQueue {
                 queueCapacities.getCapacity(nodeLabel)) <= 0f
                 && !allowZeroCapacitySum) {
               throw new IOException(
-                  "Illegal" + " capacity sum of " + childrenPctSum
+                  "Illegal capacity sum of " + childrenPctSum
                       + " for children of queue " + queueName + " for label="
                       + nodeLabel + ". queue=" + queueName
                       + " has zero capacity, but child"
