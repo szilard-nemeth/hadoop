@@ -755,6 +755,16 @@ public abstract class AbstractCSQueue implements CSQueue {
   }
 
   @Private
+  public QueueAllocationSettings getQueueAllocationSettings() {
+    return queueAllocationSettings;
+  }
+
+  @Private
+  public CSQueueUsageTracker getUsageTracker() {
+    return usageTracker;
+  }
+
+  @Private
   public ResourceUsage getQueueResourceUsage() {
     return usageTracker.getQueueUsage();
   }

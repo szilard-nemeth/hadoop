@@ -32,6 +32,7 @@ import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
+import com.google.common.collect.ImmutableMap;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.commons.lang3.time.DateUtils;
 import org.apache.hadoop.classification.InterfaceAudience.Private;
@@ -66,6 +67,9 @@ import org.apache.hadoop.yarn.server.resourcemanager.scheduler.activities.Activi
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.activities.ActivityState;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.SchedulerApplicationAttempt.AMState;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.capacity.UsersManager.User;
+import org.apache.hadoop.yarn.server.resourcemanager.scheduler.capacity.calculations.CSCalculationExplainer;
+import org.apache.hadoop.yarn.server.resourcemanager.scheduler.capacity.calculations.CSCalculationType;
+import org.apache.hadoop.yarn.server.resourcemanager.scheduler.capacity.calculations.UserAMResourcePerPartitionExplainer;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.capacity.preemption.KillableContainer;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.common.ContainerAllocationProposal;
 import org.apache.hadoop.yarn.server.resourcemanager.scheduler.common.ResourceCommitRequest;
@@ -87,10 +91,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import static org.apache.hadoop.yarn.server.resourcemanager.scheduler.capacity.CapacitySchedulerConfiguration.getACLsForFlexibleAutoCreatedLeafQueue;
+import static org.apache.hadoop.yarn.server.resourcemanager.scheduler.capacity.calculations.CSCalculationType.USER_AM_RESOURCE_PER_PARTITION;
 
 public class AbstractLeafQueue extends AbstractCSQueue {
   private static final Logger LOG =
       LoggerFactory.getLogger(AbstractLeafQueue.class);
+  
+  private static final Map<CSCalculationType, CSCalculationExplainer> CALCULATION_LOGGERS =
+      ImmutableMap.of(USER_AM_RESOURCE_PER_PARTITION, new CSCalculationExplainer(USER_AM_RESOURCE_PER_PARTITION));
 
   private float absoluteUsedCapacity = 0.0f;
 
@@ -691,76 +699,19 @@ public class AbstractLeafQueue extends AbstractCSQueue {
          null);
   }
 
-  public Resource getUserAMResourceLimitPerPartition(
-      String nodePartition, String userName) {
-    float userWeight = 1.0f;
-    if (userName != null && getUser(userName) != null) {
-      userWeight = getUser(userName).getWeight();
-    }
-
-    readLock.lock();
-    try {
-      /*
-       * The user am resource limit is based on the same approach as the user
-       * limit (as it should represent a subset of that). This means that it uses
-       * the absolute queue capacity (per partition) instead of the max and is
-       * modified by the userlimit and the userlimit factor as is the userlimit
-       */
-      float effectiveUserLimit = Math.max(usersManager.getUserLimit() / 100.0f,
-          1.0f / Math.max(getAbstractUsersManager().getNumActiveUsers(), 1));
-      float preWeightedUserLimit = effectiveUserLimit;
-      effectiveUserLimit = Math.min(effectiveUserLimit * userWeight, 1.0f);
-
-      Resource queuePartitionResource = getEffectiveCapacity(nodePartition);
-
-      Resource minimumAllocation = queueAllocationSettings.getMinimumAllocation();
-
-      Resource userAMLimit = Resources.multiplyAndNormalizeUp(
-          resourceCalculator, queuePartitionResource,
-          queueCapacities.getMaxAMResourcePercentage(nodePartition)
-              * effectiveUserLimit * usersManager.getUserLimitFactor(),
-          minimumAllocation);
-
-      if (getUserLimitFactor() == -1) {
-        userAMLimit = Resources.multiplyAndNormalizeUp(
-            resourceCalculator, queuePartitionResource,
-            queueCapacities.getMaxAMResourcePercentage(nodePartition),
-            minimumAllocation);
-      }
-
-      userAMLimit =
-          Resources.min(resourceCalculator, lastClusterResource,
-              userAMLimit,
-              Resources.clone(getAMResourceLimitPerPartition(nodePartition)));
-
-      Resource preWeighteduserAMLimit =
-          Resources.multiplyAndNormalizeUp(
-              resourceCalculator, queuePartitionResource,
-              queueCapacities.getMaxAMResourcePercentage(nodePartition)
-              * preWeightedUserLimit * usersManager.getUserLimitFactor(),
-              minimumAllocation);
-
-      if (getUserLimitFactor() == -1) {
-        preWeighteduserAMLimit = Resources.multiplyAndNormalizeUp(
-            resourceCalculator, queuePartitionResource,
-            queueCapacities.getMaxAMResourcePercentage(nodePartition),
-            minimumAllocation);
-      }
-
-      preWeighteduserAMLimit =
-          Resources.min(resourceCalculator, lastClusterResource,
-              preWeighteduserAMLimit,
-              Resources.clone(getAMResourceLimitPerPartition(nodePartition)));
-      usageTracker.getQueueUsage().setUserAMLimit(nodePartition, preWeighteduserAMLimit);
-
-      LOG.debug("Effective user AM limit for \"{}\":{}. Effective weighted"
-          + " user AM limit: {}. User weight: {}", userName,
-          preWeighteduserAMLimit, userAMLimit, userWeight);
-      return userAMLimit;
-    } finally {
-      readLock.unlock();
-    }
-
+  /**
+   * The user AM Resource limit is based on the same approach as the user
+   * limit (as it should represent a subset of that).
+   * This means that it uses
+   * the absolute queue capacity (per partition) instead of the max and is
+   * modified by the userlimit and the userlimit factor as is the userlimit
+   */
+  public Resource getUserAMResourceLimitPerPartition(String nodePartition, String userName) {
+    //TODO Init object when the queue inits
+    UserAMResourcePerPartitionExplainer e = (UserAMResourcePerPartitionExplainer) CALCULATION_LOGGERS.get(USER_AM_RESOURCE_PER_PARTITION);
+    e.initCtx(this, readLock);
+    e.initSpecific(nodePartition, userName, lastClusterResource);
+    return e.calculate();
   }
 
   public Resource calculateAndGetAMResourceLimitPerPartition(
