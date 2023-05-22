@@ -38,6 +38,7 @@ import java.io.IOException;
 import java.security.Principal;
 import java.text.SimpleDateFormat;
 import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * The {@link AuthenticationFilter} enables protecting web application
@@ -433,6 +434,9 @@ public class AuthenticationFilter implements Filter {
         if (cookie.getName().equals(AuthenticatedURL.AUTH_COOKIE)) {
           tokenStr = cookie.getValue();
           if (tokenStr.isEmpty()) {
+            LOG.debug("***ENGESC-20261: Auth cookie was empty");
+            LOG.debug("***ENGESC-20261: All cookies: " + getAllCookies(request));
+            LOG.debug("***ENGESC-20261: Request details: " + getRequestURL(request));
             throw new AuthenticationException("Unauthorized access");
           }
           try {
@@ -455,6 +459,11 @@ public class AuthenticationFilter implements Filter {
       }
     }
     return token;
+  }
+
+  public static List<String> getAllCookies(HttpServletRequest request) {
+    return Arrays.stream(request.getCookies())
+        .map(Cookie::toString).collect(Collectors.toList());
   }
 
   /**
@@ -510,6 +519,7 @@ public class AuthenticationFilter implements Filter {
     AuthenticationException authenticationEx = null;
     HttpServletRequest httpRequest = (HttpServletRequest) request;
     HttpServletResponse httpResponse = (HttpServletResponse) response;
+    logClientDetails(httpRequest);
     boolean isHttps = "https".equals(httpRequest.getScheme());
     try {
       boolean newToken = false;
@@ -522,18 +532,23 @@ public class AuthenticationFilter implements Filter {
         }
       }
       catch (AuthenticationException ex) {
-        LOG.warn("AuthenticationToken ignored: " + ex.getMessage());
+        LOG.warn("***ENGESC-20261: AuthenticationToken ignored: {}. Request URL: {}", ex.getMessage(), getRequestURL(httpRequest));
+        LOG.error("***ENGESC-20261: Printing exception stacktrace", ex);
         // will be sent back in a 401 unless filter authenticates
         authenticationEx = ex;
         token = null;
       }
-      if (authHandler.managementOperation(token, httpRequest, httpResponse)) {
+      
+      boolean mgmtOperation = authHandler.managementOperation(token, httpRequest, httpResponse);
+      LOG.debug("***ENGESC-20261: Management operation: {}, token: {}", mgmtOperation, token);
+      if (mgmtOperation) {
         if (token == null) {
           if (LOG.isDebugEnabled()) {
             LOG.debug("Request [{}] triggering authentication. handler: {}",
                 getRequestURL(httpRequest), authHandler.getClass());
           }
           token = authHandler.authenticate(httpRequest, httpResponse);
+          LOG.debug("***ENGESC-20261: Token after authHandler.authenticate: {}", token);
           if (token != null && token != AuthenticationToken.ANONYMOUS) {
             if (token.getMaxInactives() > 0) {
               token.setMaxInactives(System.currentTimeMillis()
@@ -544,6 +559,7 @@ public class AuthenticationFilter implements Filter {
                   + getValidity() * 1000);
             }
           }
+          LOG.debug("***ENGESC-20261: newtoken set to true #1");
           newToken = true;
         }
         if (token != null) {
@@ -580,11 +596,14 @@ public class AuthenticationFilter implements Filter {
             token.setMaxInactives(System.currentTimeMillis()
                 + getMaxInactiveInterval() * 1000);
             token.setExpires(token.getExpires());
+            LOG.debug("***ENGESC-20261: newtoken set to true #2");
             newToken = true;
           }
           if (newToken && !token.isExpired()
               && token != AuthenticationToken.ANONYMOUS) {
+            LOG.debug("***ENGESC-20261: Token before signing: {}", token);
             String signedToken = signer.sign(token.toString());
+            LOG.debug("***ENGESC-20261: Token after signing: {}", signedToken);
             createAuthCookie(httpResponse, signedToken, getCookieDomain(),
                     getCookiePath(), token.getExpires(),
                     isCookiePersistent(), isHttps);
@@ -634,6 +653,30 @@ public class AuthenticationFilter implements Filter {
     }
   }
 
+  private void logClientDetails(HttpServletRequest request) {
+    String ipAddress = request.getHeader("X-FORWARDED-FOR");
+    if (ipAddress == null) {
+      ipAddress = request.getRemoteAddr();
+    }
+    LOG.debug("IP address of client: {}, request headers: {}", ipAddress, getRequestHeaders(request));
+  }
+
+  private Map<String, String> getRequestHeaders(HttpServletRequest request) {
+    Map<String, String> result = new HashMap<>();
+
+    Enumeration headerNames = request.getHeaderNames();
+    if (headerNames == null) {
+      return result;
+    }
+    while (headerNames.hasMoreElements()) {
+      String key = (String) headerNames.nextElement();
+      String value = request.getHeader(key);
+      result.put(key, value);
+    }
+
+    return result;
+  }
+
   /**
    * Delegates call to the servlet filter chain. Sub-classes my override this
    * method to perform pre and post tasks.
@@ -670,6 +713,8 @@ public class AuthenticationFilter implements Filter {
                                       String domain, String path, long expires,
                                       boolean isCookiePersistent,
                                       boolean isSecure) {
+    LOG.debug("***ENGESC-20261: createAuthCookie, token: {}, path: {}, domain: {}, path: {}, expires: {}", 
+        token, path, domain, path, expires);
     StringBuilder sb = new StringBuilder(AuthenticatedURL.AUTH_COOKIE)
                            .append("=");
     if (token != null && token.length() > 0) {
@@ -689,7 +734,9 @@ public class AuthenticationFilter implements Filter {
       SimpleDateFormat df = new SimpleDateFormat("EEE, " +
               "dd-MMM-yyyy HH:mm:ss zzz", Locale.US);
       df.setTimeZone(TimeZone.getTimeZone("GMT"));
-      sb.append("; Expires=").append(df.format(date));
+      String expStr = df.format(date);
+      sb.append("; Expires=").append(expStr);
+      LOG.debug("***ENGESC-20261: Adding cookie expiration info: {}", expStr);
     }
 
     if (isSecure) {
@@ -697,6 +744,8 @@ public class AuthenticationFilter implements Filter {
     }
 
     sb.append("; HttpOnly");
-    resp.addHeader("Set-Cookie", sb.toString());
+    String cookieStr = sb.toString();
+    LOG.debug("***ENGESC-20261: Final cookie string: {}", cookieStr);
+    resp.addHeader("Set-Cookie", cookieStr);
   }
 }

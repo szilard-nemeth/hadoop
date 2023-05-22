@@ -29,6 +29,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * The {@link AuthenticatedURL} class enables the use of the JDK {@link URL} class
@@ -86,6 +88,7 @@ public class AuthenticatedURL {
         Map<String, List<String>> requestHeaders) throws IOException {
       // call getter so it will reset headers if token is expiring.
       getAuthCookie();
+      LOG.debug("***ENGESC-20261: Returning cookieHeaders: {}", cookieHeaders);
       return cookieHeaders;
     }
 
@@ -94,6 +97,7 @@ public class AuthenticatedURL {
       List<String> headers = responseHeaders.get("Set-Cookie");
       if (headers != null) {
         for (String header : headers) {
+          LOG.debug("***ENGESC-20261: Processing header: {}", header);
           List<HttpCookie> cookies;
           try {
             cookies = HttpCookie.parse(header);
@@ -102,6 +106,7 @@ public class AuthenticatedURL {
             LOG.debug("Cannot parse cookie header: " + header, iae);
             continue;
           }
+          LOG.debug("***ENGESC-20261: Cookies as strings: {}", cookiesToString(cookies));
           for (HttpCookie cookie : cookies) {
             if (AUTH_COOKIE.equals(cookie.getName())) {
               setAuthCookie(cookie);
@@ -111,29 +116,47 @@ public class AuthenticatedURL {
       }
     }
 
+    public static List<String> cookiesToString(List<HttpCookie> cookies) {
+      return Stream.of(cookies).map(Object::toString).collect(Collectors.toList());
+    }
+
     // return the auth cookie if still valid.
     private synchronized HttpCookie getAuthCookie() {
       if (authCookie != null && authCookie.hasExpired()) {
+        LOG.debug("***ENGESC-20261: Auth cookie is expired.");
         setAuthCookie(null);
       }
       return authCookie;
     }
 
     private synchronized void setAuthCookie(HttpCookie cookie) {
+      LOG.debug("***ENGESC-20261: Setting auth cookie");
       final HttpCookie oldCookie = authCookie;
       // will redefine if new cookie is valid.
       authCookie = null;
       cookieHeaders = Collections.emptyMap();
       boolean valid = cookie != null && !cookie.getValue().isEmpty() &&
           !cookie.hasExpired();
+      if (cookie == null) {
+        LOG.debug("***ENGESC-20261: Auth cookie is null.");
+      } else {
+        LOG.debug("***ENGESC-20261: Auth cookie value: " + cookie.getValue());
+        LOG.debug("***ENGESC-20261: Auth cookie expired?: " + cookie.hasExpired());
+      }
+      LOG.debug("***ENGESC-20261: Auth cookie valid?: " + valid);
+      
       if (valid) {
         // decrease lifetime to avoid using a cookie soon to expire.
         // allows authenticators to pre-emptively reauthenticate to
         // prevent clients unnecessarily receiving a 401.
+        LOG.debug("***ENGESC-20261: Auth cookie, decreasing lifetime. Current maxAge: {}", cookie.getMaxAge());
         long maxAge = cookie.getMaxAge();
         if (maxAge != -1) {
-          cookie.setMaxAge(maxAge * 9/10);
+          long newMaxAge = maxAge * 9 / 10;
+          LOG.debug("***ENGESC-20261: Auth cookie, decreasing lifetime. new maxAge: {}", newMaxAge);
+          cookie.setMaxAge(newMaxAge);
           valid = !cookie.hasExpired();
+          LOG.debug("***ENGESC-20261: Auth cookie, decreasing lifetime. new valid value: {}", valid);
         }
       }
       if (valid) {
@@ -146,6 +169,7 @@ public class AuthenticatedURL {
             cookie.setValue(value);
           }
         }
+        LOG.debug("***ENGESC-20261: Setting cookie to authCookie field: {}", cookie);
         authCookie = cookie;
         cookieHeaders = new HashMap<>();
         cookieHeaders.put("Cookie", Arrays.asList(cookie.toString()));
@@ -153,6 +177,15 @@ public class AuthenticatedURL {
     }
 
     private void setAuthCookieValue(String value) {
+      if (LOG.isTraceEnabled()) {
+        LOG.trace("***ENGESC-20261: Setting cookie value", new Exception());  
+      }
+      if (value == null || value.equals("")) {
+        LOG.debug("***ENGESC-20261: New cookie value is null or empty: {}", value);
+      } else {
+        LOG.debug("***ENGESC-20261: New cookie value: {}", value);  
+      }
+      
       HttpCookie c = null;
       if (value != null) {
         c = new HttpCookie(AUTH_COOKIE, value);
@@ -180,6 +213,7 @@ public class AuthenticatedURL {
      * @param tokenStr string representation of the tokenStr.
      */
     public Token(String tokenStr) {
+      LOG.debug("***ENGESC-20261: Token ctor invoked with string value: {}", tokenStr);
       if (tokenStr == null) {
         throw new IllegalArgumentException("tokenStr cannot be null");
       }
@@ -388,11 +422,11 @@ public class AuthenticatedURL {
       // not opened via this instance.
       token.cookieHandler.put(null, conn.getHeaderFields());
     } else if (respCode == HttpURLConnection.HTTP_NOT_FOUND) {
-      LOG.trace("Setting token value to null ({}), resp={}", token, respCode);
+      LOG.debug("***ENGESC-20261: Setting token value to null. token: {}, resp: {}, conn: {}", token, respCode, conn.getURL());
       token.set(null);
       throw new FileNotFoundException(conn.getURL().toString());
     } else {
-      LOG.trace("Setting token value to null ({}), resp={}", token, respCode);
+      LOG.debug("***ENGESC-20261: Setting token value to null. token: {}, resp: {}, conn: {}", token, respCode, conn.getURL());
       token.set(null);
       throw new AuthenticationException("Authentication failed" +
           ", URL: " + conn.getURL() +
